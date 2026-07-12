@@ -51,27 +51,30 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           pmbootstrap --version
           
-          # Patch pmbootstrap command runner to allow untrusted signatures for cached packages!
+          # Patch pmbootstrap's core command execution module (pmb/helpers/run_core.py) 
+          # to intercept any 'apk add' or 'apk.static add' command and inject '--allow-untrusted'.
           python3 -c '
-          import pmb.helpers.run as r
+          import pmb.helpers.run_core as rc
           import inspect
-          run_file = inspect.getfile(r)
-          print("Locating run.py:", run_file)
-          with open(run_file, "r") as f:
+          run_core_file = inspect.getfile(rc)
+          print("Locating run_core.py:", run_core_file)
+          with open(run_core_file, "r") as f:
               code = f.read()
-          target = "cmd_parts = [os.fspath(c) for c in cmd]"
-          patch = """cmd_parts = [os.fspath(c) for c in cmd]
-              if any(p == "apk" or "apk.static" in p or p.endswith("/apk") for p in cmd_parts) and "add" in cmd_parts:
-                  if "--allow-untrusted" not in cmd_parts:
-                      idx = cmd_parts.index("add")
-                      cmd_parts.insert(idx + 1, "--allow-untrusted")"""
+          target = "sanity_checks(output, output_return, check)"
+          patch = """sanity_checks(output, output_return, check)
+      import os
+      cmd = [os.fspath(c) for c in cmd]
+      if any(p == "apk" or "apk.static" in p or p.endswith("/apk") for p in cmd) and "add" in cmd:
+          if "--allow-untrusted" not in cmd:
+              idx = cmd.index("add")
+              cmd.insert(idx + 1, "--allow-untrusted")"""
           if target in code:
               code = code.replace(target, patch)
-              with open(run_file, "w") as f:
+              with open(run_core_file, "w") as f:
                   f.write(code)
-              print("✅ Successfully patched run.py to allow untrusted packages!")
+              print("✅ Successfully patched run_core.py to allow untrusted packages!")
           else:
-              print("❌ Failed to patch run.py: target string not found!")
+              print("❌ Failed to patch run_core.py: target string not found!")
               exit(1)
           '
           echo "✅ pmbootstrap installed and patched"
