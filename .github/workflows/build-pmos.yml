@@ -110,7 +110,7 @@ jobs:
           PMAPORTS_DIR="$WORK_DIR/cache_git/pmaports"
 
           echo "📥 Cloning pmaports (edge channel)..."
-          git clone --depth=1 --branch=master \
+          git clone --depth=1 \
             https://gitlab.postmarketos.org/postmarketOS/pmaports.git \
             "$PMAPORTS_DIR"
 
