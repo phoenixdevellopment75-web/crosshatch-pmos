@@ -121,18 +121,14 @@ jobs:
 
           echo "✅ Pre-initialization complete"
 
-      # ── 5. Initialize pmbootstrap chroot ─────────────────────────────
-      - name: Initialize pmbootstrap work directory
+      # ── 5. Verify configuration ──────────────────────────────────────
+      - name: Verify configuration status
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
 
           echo "🔧 Running pmbootstrap status..."
-          pmbootstrap status || true
-
-          echo ""
-          echo "🔧 Setting up pmbootstrap keys and chroot..."
-          yes "" | pmbootstrap -q init
+          pmbootstrap status
 
           echo ""
           echo "📋 Final configuration:"
@@ -140,7 +136,7 @@ jobs:
           echo "  UI:     $(pmbootstrap config ui)"
           echo "  Work:   $(pmbootstrap config work)"
           echo ""
-          echo "✅ pmbootstrap initialized"
+          echo "✅ Configuration verified successfully"
 
       # ── 6. Build kernel (linux-google-crosshatch-mainline) ───────────
       - name: Build kernel (linux-google-crosshatch-mainline)
