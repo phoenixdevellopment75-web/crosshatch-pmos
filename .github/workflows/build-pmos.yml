@@ -66,31 +66,34 @@ jobs:
           CONFIG_DIR="$HOME/.config/pmbootstrap"
           mkdir -p "$CONFIG_DIR"
 
-          cat > "$CONFIG_DIR/pmbootstrap.cfg" << EOF
-[pmbootstrap]
-aports = $WORK_DIR/cache_git/pmaports
-build_default_device_arch = True
-boot_size = 256
-channel = edge
-device = google-crosshatch
-extra_space = 2048
-hostname = pixel3xl
-is_default_channel = False
-jobs = $(nproc)
-kernel = linux-postmarketos-qcom-sdm845
-keymap =
-locale = en_US.UTF-8
-mirror_alpine = http://dl-cdn.alpinelinux.org/alpine/
-nonfree_firmware = True
-nonfree_userland = True
-ssh_keys = True
-ssh_key_glob = ~/.ssh/id_*.pub
-timezone = Asia/Kolkata
-ui = ${{ github.event.inputs.ui }}
-ui_extras = True
-user = user
-work = $WORK_DIR
-EOF
+          cat > "$CONFIG_DIR/pmbootstrap.cfg" << 'EOF'
+          [pmbootstrap]
+          aports = /home/runner/.local/var/pmbootstrap/cache_git/pmaports
+          build_default_device_arch = True
+          boot_size = 256
+          channel = edge
+          device = google-crosshatch
+          extra_space = 2048
+          hostname = pixel3xl
+          is_default_channel = False
+          jobs = 2
+          kernel = linux-postmarketos-qcom-sdm845
+          keymap =
+          locale = en_US.UTF-8
+          mirror_alpine = http://dl-cdn.alpinelinux.org/alpine/
+          nonfree_firmware = True
+          nonfree_userland = True
+          ssh_keys = True
+          ssh_key_glob = ~/.ssh/id_*.pub
+          timezone = Asia/Kolkata
+          ui = ${{ github.event.inputs.ui || 'plasma-mobile' }}
+          ui_extras = True
+          user = user
+          work = /home/runner/.local/var/pmbootstrap
+          EOF
+
+          # Remove leading whitespace (10 spaces)
+          sed -i 's/^          //' "$CONFIG_DIR/pmbootstrap.cfg"
 
           echo "📄 Config file:"
           cat "$CONFIG_DIR/pmbootstrap.cfg"
@@ -199,8 +202,8 @@ EOF
 
           # Pipe the password twice (password + confirmation)
           printf '%s\n%s\n' \
-            "${{ github.event.inputs.user_password }}" \
-            "${{ github.event.inputs.user_password }}" | \
+            "${{ github.event.inputs.user_password || 'pixel3xl' }}" \
+            "${{ github.event.inputs.user_password || 'pixel3xl' }}" | \
           pmbootstrap install --no-fde 2>&1
 
           echo ""
@@ -237,32 +240,35 @@ EOF
 
           # Add flash instructions
           cat > "$EXPORT_DIR/FLASH_INSTRUCTIONS.txt" << 'EOF'
-=====================================================
- FLASH INSTRUCTIONS — postmarketOS on Pixel 3 XL
-=====================================================
+          =====================================================
+           FLASH INSTRUCTIONS — postmarketOS on Pixel 3 XL
+          =====================================================
 
-1. Boot into fastboot:
-   Power off → hold Volume Down + Power
+          1. Boot into fastboot:
+             Power off → hold Volume Down + Power
 
-2. Verify: fastboot devices
+          2. Verify: fastboot devices
 
-3. Set slot: fastboot set_active a
+          3. Set slot: fastboot set_active a
 
-4. Flash:
-   fastboot flash boot boot.img
-   fastboot flash userdata google-crosshatch.img
+          4. Flash:
+             fastboot flash boot boot.img
+             fastboot flash userdata google-crosshatch.img
 
-5. Reboot: fastboot reboot
+          5. Reboot: fastboot reboot
 
-6. SSH: ssh user@172.16.42.1
-=====================================================
-EOF
+          6. SSH: ssh user@172.16.42.1
+          =====================================================
+          EOF
+
+          # Remove leading whitespace (10 spaces)
+          sed -i 's/^          //' "$EXPORT_DIR/FLASH_INSTRUCTIONS.txt"
 
       # ── 10. Upload artifacts ─────────────────────────────────────────
       - name: Upload flashable images
         uses: actions/upload-artifact@v4
         with:
-          name: postmarketOS-crosshatch-${{ github.event.inputs.ui }}
+          name: postmarketOS-crosshatch-${{ github.event.inputs.ui || 'plasma-mobile' }}
           path: /tmp/pmos-images/
           retention-days: 30
           if-no-files-found: error
@@ -275,6 +281,6 @@ EOF
           echo "╔══════════════════════════════════════════════════╗"
           echo "║  BUILD COMPLETE                                  ║"
           echo "║  Device:  Pixel 3 XL (crosshatch)               ║"
-          echo "║  UI:      ${{ github.event.inputs.ui }}          "
+          echo "║  UI:      ${{ github.event.inputs.ui || 'plasma-mobile' }}          "
           echo "║  Download artifact from the Actions tab          ║"
           echo "╚══════════════════════════════════════════════════╝"
