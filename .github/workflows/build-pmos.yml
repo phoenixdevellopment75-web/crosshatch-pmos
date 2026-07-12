@@ -42,51 +42,15 @@ jobs:
             git openssl binfmt-support qemu-user-static \
             coreutils procps sudo e2fsprogs
 
-      # ── 2. Install & Patch pmbootstrap ───────────────────────────────
-      - name: Install & Patch pmbootstrap
+      # ── 2. Install pmbootstrap ───────────────────────────────────────
+      - name: Install pmbootstrap
         run: |
           set -euo pipefail
           pip3 install --user git+https://gitlab.postmarketos.org/postmarketOS/pmbootstrap.git
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           export PATH="$HOME/.local/bin:$PATH"
           pmbootstrap --version
-          
-          # Patch pmbootstrap core command runner (pmb/helpers/run_core.py)
-          # to intercept apk add and apk.static add commands (both list-based and shell-based)
-          # and inject the global '--allow-untrusted' flag BEFORE the 'add' subcommand.
-          python3 -c '
-          import pmb.helpers.run_core as rc
-          import inspect
-          import textwrap
-          run_core_file = inspect.getfile(rc)
-          print("Locating run_core.py:", run_core_file)
-          with open(run_core_file, "r") as f:
-              code = f.read()
-          target = "    sanity_checks(output, output_return, check)"
-          patch = textwrap.dedent("""\
-              sanity_checks(output, output_return, check)
-              import os
-              cmd = [os.fspath(c) for c in cmd]
-              if any(p == "apk" or "apk.static" in p or p.endswith("/apk") for p in cmd) and "add" in cmd:
-                  if "--allow-untrusted" not in cmd:
-                      idx = cmd.index("add")
-                      cmd.insert(idx, "--allow-untrusted")
-              else:
-                  for idx, part in enumerate(cmd):
-                      if ("apk" in part or "apk.static" in part) and " add " in part:
-                          if "--allow-untrusted" not in part:
-                              cmd[idx] = part.replace(" add ", " --allow-untrusted add ", 1)""")
-          patch = "    " + patch.replace("\n", "\n    ")
-          if target in code:
-              code = code.replace(target, patch)
-              with open(run_core_file, "w") as f:
-                  f.write(code)
-              print("Successfully patched run_core.py to allow untrusted packages!")
-          else:
-              print("Failed to patch run_core.py: target string not found!")
-              exit(1)
-          '
-          echo "✅ pmbootstrap installed and patched"
+          echo "✅ pmbootstrap installed"
 
       # ── 3. Configure pmbootstrap (non-interactive) ───────────────────
       - name: Configure pmbootstrap
@@ -94,7 +58,6 @@ jobs:
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
 
-          # Write config file directly — must be pmbootstrap_v3.cfg for pmbootstrap 3.x!
           CONFIG_DIR="$HOME/.config"
           mkdir -p "$CONFIG_DIR"
 
@@ -124,12 +87,9 @@ jobs:
           work = /home/runner/.local/var/pmbootstrap
           EOF
 
-          # Remove leading whitespace (10 spaces)
           sed -i 's/^          //' "$CONFIG_DIR/pmbootstrap_v3.cfg"
-
           echo "📄 Config file:"
           cat "$CONFIG_DIR/pmbootstrap_v3.cfg"
-          echo ""
           echo "✅ pmbootstrap configured for google-crosshatch"
 
       # ── 4. Pre-initialize workdir ───────────────────────────────────
@@ -137,21 +97,19 @@ jobs:
         run: |
           set -euo pipefail
           WORK_DIR="/home/runner/.local/var/pmbootstrap"
-          echo "📁 Creating work directory..."
           mkdir -p "$WORK_DIR"
           mkdir -p "$WORK_DIR/cache_git"
-
-          # Write work folder version file (expects version 8 for pmbootstrap v3)
           echo "8" > "$WORK_DIR/version"
           echo "Version file created with content: 8"
 
-      # ── 5. Restore pmbootstrap packages cache ────────────────────────
+      # ── 5. Restore pmbootstrap packages + signing key cache ──────────
       - name: Restore pmbootstrap packages cache
         uses: actions/cache/restore@v4
         with:
           path: |
             /home/runner/.local/var/pmbootstrap/packages
             /home/runner/.local/var/pmbootstrap/cache_apk
+            /home/runner/.local/var/pmbootstrap/config_apk_keys
           key: pmbootstrap-packages-${{ runner.os }}-${{ github.sha }}
           restore-keys: |
             pmbootstrap-packages-${{ runner.os }}-
@@ -161,18 +119,20 @@ jobs:
         run: |
           set -euo pipefail
           WORK_DIR="/home/runner/.local/var/pmbootstrap"
-          
-          # Since the previous run cached files under "packages/edge", 
-          # we copy them to "packages/systemd-edge" to bypass compilation.
+
           if [ -d "$WORK_DIR/packages/edge" ]; then
             echo "📋 Migrating cached edge packages to systemd-edge..."
             mkdir -p "$WORK_DIR/packages/systemd-edge"
             cp -r "$WORK_DIR/packages/edge/"* "$WORK_DIR/packages/systemd-edge/" || true
-            echo "✅ Packages migrated:"
-            find "$WORK_DIR/packages/systemd-edge" -name "*.apk" || echo "No apk files found"
+            echo "✅ Packages migrated"
           else
             echo "ℹ️ No cached packages found under edge/"
           fi
+
+          # Show what signing keys we have from the cache
+          echo ""
+          echo "🔑 Signing keys in config_apk_keys:"
+          ls -la "$WORK_DIR/config_apk_keys/" 2>/dev/null || echo "(none restored from cache)"
 
       # ── 7. Clone pmaports ────────────────────────────────────────────
       - name: Clone pmaports
@@ -181,7 +141,7 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           PMAPORTS_DIR="/home/runner/.local/var/pmbootstrap/cache_git/pmaports"
 
-          echo "📥 Cloning pmaports (edge channel, shallow clone)..."
+          echo "📥 Cloning pmaports..."
           git clone --depth=1 \
             https://gitlab.postmarketos.org/postmarketOS/pmaports.git \
             "$PMAPORTS_DIR"
@@ -202,24 +162,18 @@ jobs:
           echo "  Device: $(pmbootstrap config device)"
           echo "  UI:     $(pmbootstrap config ui)"
           echo "  Work:   $(pmbootstrap config work)"
-          echo ""
           echo "✅ Configuration verified successfully"
 
-      # ── 9. Build kernel (linux-google-crosshatch-mainline) ───────────
+      # ── 9. Build kernel ─────────────────────────────────────────────
       - name: Build kernel (linux-google-crosshatch-mainline)
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
 
-          echo "========================================="
-          echo "🔨 Building linux-google-crosshatch-mainline"
-          echo "If cached, this will complete instantly!"
-          echo "========================================="
-
+          echo "🔨 Building linux-google-crosshatch-mainline (uses cache if available)..."
           pmbootstrap build linux-google-crosshatch-mainline 2>&1
 
-          echo ""
-          echo "✅ Kernel built successfully"
+          echo "✅ Kernel built/found in cache"
 
       # ── 10. Build device package ─────────────────────────────────────
       - name: Build device package
@@ -227,24 +181,20 @@ jobs:
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
 
-          echo "========================================="
-          echo "📦 Building device-google-crosshatch"
-          echo "If cached, this will complete instantly!"
-          echo "========================================="
-
+          echo "📦 Building device-google-crosshatch (uses cache if available)..."
           pmbootstrap build device-google-crosshatch 2>&1
 
-          echo ""
-          echo "✅ device-google-crosshatch built"
+          echo "✅ device-google-crosshatch built/found in cache"
 
-      # ── 11. Save pmbootstrap packages cache ──────────────────────────
+      # ── 11. Save pmbootstrap packages + signing key cache ─────────────
       - name: Save pmbootstrap packages cache
         uses: actions/cache/save@v4
-        if: always() # Save even if subsequent image building fails!
+        if: always()
         with:
           path: |
             /home/runner/.local/var/pmbootstrap/packages
             /home/runner/.local/var/pmbootstrap/cache_apk
+            /home/runner/.local/var/pmbootstrap/config_apk_keys
           key: pmbootstrap-packages-${{ runner.os }}-${{ github.sha }}
 
       # ── 12. Create installation image ────────────────────────────────
@@ -257,7 +207,11 @@ jobs:
           echo "💾 Running pmbootstrap install"
           echo "========================================="
 
-          # Pipe the password twice (password + confirmation)
+          # Show keys before running — must match the ones used to sign packages
+          WORK_DIR="/home/runner/.local/var/pmbootstrap"
+          echo "🔑 Keys available to apk:"
+          ls -la "$WORK_DIR/config_apk_keys/" 2>/dev/null || echo "(no keys)"
+
           printf '%s\n%s\n' \
             "${{ github.event.inputs.user_password || 'pixel3xl' }}" \
             "${{ github.event.inputs.user_password || 'pixel3xl' }}" | \
@@ -282,20 +236,14 @@ jobs:
           echo "📂 Exported files:"
           ls -lah "$EXPORT_DIR/"
 
-          # Verify we actually have real images
           IMG_COUNT=$(find "$EXPORT_DIR" -name "*.img" -size +1M | wc -l)
           if [ "$IMG_COUNT" -eq 0 ]; then
-            echo ""
-            echo "❌ ERROR: No .img files larger than 1MB found!"
-            echo "The build likely failed. Checking work dir..."
-            find "$(pmbootstrap config work)" -name "*.img" -size +1M 2>/dev/null || true
+            echo "❌ ERROR: No .img files found larger than 1MB!"
             exit 1
           fi
 
-          echo ""
           echo "✅ Found $IMG_COUNT image file(s) ready to flash"
 
-          # Add flash instructions
           cat > "$EXPORT_DIR/FLASH_INSTRUCTIONS.txt" << 'EOF'
           =====================================================
            FLASH INSTRUCTIONS — postmarketOS on Pixel 3 XL
@@ -318,7 +266,6 @@ jobs:
           =====================================================
           EOF
 
-          # Remove leading whitespace (10 spaces)
           sed -i 's/^          //' "$EXPORT_DIR/FLASH_INSTRUCTIONS.txt"
 
       # ── 14. Upload artifacts ─────────────────────────────────────────
