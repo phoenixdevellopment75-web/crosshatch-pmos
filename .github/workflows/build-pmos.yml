@@ -1,0 +1,252 @@
+# ============================================================================
+# postmarketOS Builder for Pixel 3 XL (crosshatch)
+# Build in GitHub Actions, download flashable images, flash locally
+# ============================================================================
+#
+# HOW TO USE:
+#
+# 1. Create a new GitHub repo (e.g., "pmos-crosshatch-builder")
+# 2. Place this file at: .github/workflows/build-pmos.yml
+# 3. Push to GitHub
+# 4. Go to Actions tab → "Build postmarketOS for Pixel 3 XL" → Run workflow
+# 5. Wait ~20-40 minutes for the build
+# 6. Download the artifact zip containing boot.img and rootfs
+# 7. Flash to your Pixel 3 XL using fastboot (see bottom of file)
+#
+# ============================================================================
+
+name: Build postmarketOS for Pixel 3 XL
+
+on:
+  # Manual trigger from GitHub UI
+  workflow_dispatch:
+    inputs:
+      ui:
+        description: 'User Interface'
+        required: true
+        default: 'plasma-mobile'
+        type: choice
+        options:
+          - plasma-mobile
+          - phosh
+          - sxmo-de-sway
+          - console
+      user_password:
+        description: 'User password for the pmos install (used for SSH login)'
+        required: true
+        default: 'pixel3xl'
+      extra_packages:
+        description: 'Extra packages to include (comma-separated)'
+        required: false
+        default: 'vim,htop,tmux,nano,networkmanager,bluez'
+
+jobs:
+  build:
+    name: Build postmarketOS Image
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      # ── Step 1: Install system dependencies ──────────────────────────
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            python3 \
+            python3-pip \
+            python3-venv \
+            git \
+            openssl \
+            android-tools-adb \
+            android-tools-fastboot \
+            sudo \
+            coreutils \
+            procps
+
+      # ── Step 2: Clone and install pmbootstrap ────────────────────────
+      - name: Set up pmbootstrap
+        run: |
+          # Clone latest pmbootstrap
+          git clone --depth=1 https://gitlab.postmarketos.org/postmarketOS/pmbootstrap.git ~/pmbootstrap
+          
+          # Add to PATH
+          echo "$HOME/pmbootstrap" >> $GITHUB_PATH
+          
+          # Verify
+          ~/pmbootstrap/pmbootstrap.py --version
+
+      # ── Step 3: Initialize pmbootstrap (non-interactive) ─────────────
+      - name: Initialize pmbootstrap
+        run: |
+          # Create work directory
+          mkdir -p /tmp/pmos-work
+          
+          # Initialize with all options set via command line to avoid
+          # interactive prompts that would hang CI
+          ~/pmbootstrap/pmbootstrap.py \
+            --work /tmp/pmos-work \
+            --mirror-alpine "http://dl-cdn.alpinelinux.org/alpine/" \
+            init \
+            --config-channels edge \
+            --config-device google-crosshatch \
+            --config-ui "${{ github.event.inputs.ui }}" \
+            --config-hostname pixel3xl \
+            --config-locale "en_US.UTF-8" \
+            --no-build \
+          || {
+            echo "============================================="
+            echo "pmbootstrap init with flags failed."
+            echo "Falling back to config-file based init..."
+            echo "============================================="
+            
+            # Fallback: write the config file directly
+            mkdir -p ~/.config/pmbootstrap
+            cat > ~/.config/pmbootstrap/pmbootstrap.cfg << PMCFG
+          [pmbootstrap]
+          work = /tmp/pmos-work
+          channel = edge
+          ui = ${{ github.event.inputs.ui }}
+          device = google-crosshatch
+          hostname = pixel3xl
+          locale = en_US.UTF-8
+          build_default_device_arch = True
+          is_default_channel = False
+          kernel = linux-postmarketos-qcom-sdm845
+          keymap =
+          nonfree_firmware = True
+          nonfree_userland = True
+          ssh_keys = True
+          timezone = Asia/Kolkata
+          user = user
+          boot_size = 256
+          extra_space = 0
+          PMCFG
+            
+            echo "Config file written. Proceeding..."
+          }
+
+      # ── Step 4: Build kernel and device packages ─────────────────────
+      - name: Build kernel package
+        run: |
+          echo "========================================="
+          echo "Building linux-postmarketos-qcom-sdm845"
+          echo "This may take 15-30 minutes..."
+          echo "========================================="
+          
+          ~/pmbootstrap/pmbootstrap.py \
+            --work /tmp/pmos-work \
+            build linux-postmarketos-qcom-sdm845 \
+            --force \
+          2>&1 | tail -100
+
+      - name: Build device package
+        run: |
+          echo "========================================="
+          echo "Building device-google-crosshatch"
+          echo "========================================="
+          
+          ~/pmbootstrap/pmbootstrap.py \
+            --work /tmp/pmos-work \
+            build device-google-crosshatch \
+            --force \
+          2>&1 | tail -100
+
+      # ── Step 5: Build extra packages if specified ────────────────────
+      - name: Build extra packages
+        if: ${{ github.event.inputs.extra_packages != '' }}
+        run: |
+          IFS=',' read -ra PKGS <<< "${{ github.event.inputs.extra_packages }}"
+          for pkg in "${PKGS[@]}"; do
+            pkg=$(echo "$pkg" | xargs)  # trim whitespace
+            echo "Installing extra package: $pkg"
+          done
+
+      # ── Step 6: Create the installation image ───────────────────────
+      - name: Create installation image
+        run: |
+          echo "========================================="
+          echo "Running pmbootstrap install"
+          echo "========================================="
+          
+          # Install with the user password
+          echo "${{ github.event.inputs.user_password }}" | \
+          ~/pmbootstrap/pmbootstrap.py \
+            --work /tmp/pmos-work \
+            install \
+            --password \
+            --no-fde \
+          2>&1 | tail -100
+
+      # ── Step 7: Export flashable images ──────────────────────────────
+      - name: Export flashable images
+        run: |
+          mkdir -p /tmp/pmos-images
+          
+          ~/pmbootstrap/pmbootstrap.py \
+            --work /tmp/pmos-work \
+            export /tmp/pmos-images \
+          2>&1 | tail -50
+          
+          echo ""
+          echo "========================================="
+          echo "Exported images:"
+          echo "========================================="
+          ls -lah /tmp/pmos-images/
+          
+          # Create a flash instructions file
+          cat > /tmp/pmos-images/FLASH_INSTRUCTIONS.txt << 'FLASH'
+          =====================================================
+           FLASHING INSTRUCTIONS — postmarketOS on Pixel 3 XL
+          =====================================================
+          
+          1. Boot your Pixel 3 XL into fastboot mode:
+             - Power off the phone
+             - Hold Volume Down + Power until "Fastboot Mode" appears
+          
+          2. Verify connection:
+             fastboot devices
+          
+          3. Set active slot:
+             fastboot set_active a
+          
+          4. Flash the boot image:
+             fastboot flash boot boot.img
+          
+          5. Flash the root filesystem:
+             fastboot flash userdata google-crosshatch.img
+          
+          6. Reboot:
+             fastboot reboot
+          
+          7. SSH into the phone (after boot, connect via USB):
+             ssh user@172.16.42.1
+             Password: (whatever you set in the workflow)
+          
+          NOTE: First boot may take 1-3 minutes. The screen may
+          be blank initially — SSH via USB should still work.
+          =====================================================
+          FLASH
+
+      # ── Step 8: Upload as downloadable artifact ─────────────────────
+      - name: Upload flashable images
+        uses: actions/upload-artifact@v4
+        with:
+          name: postmarketOS-crosshatch-${{ github.event.inputs.ui }}-${{ github.run_number }}
+          path: /tmp/pmos-images/
+          retention-days: 30
+          compression-level: 6
+
+      # ── Step 9: Print summary ───────────────────────────────────────
+      - name: Build summary
+        run: |
+          echo ""
+          echo "╔══════════════════════════════════════════════════════════╗"
+          echo "║  ✅ BUILD COMPLETE                                      ║"
+          echo "║                                                          ║"
+          echo "║  Device:  Google Pixel 3 XL (crosshatch)                ║"
+          echo "║  UI:      ${{ github.event.inputs.ui }}                  "
+          echo "║  Channel: edge                                           ║"
+          echo "║                                                          ║"
+          echo "║  Download the artifact from the Actions tab, then       ║"
+          echo "║  follow FLASH_INSTRUCTIONS.txt inside the zip.          ║"
+          echo "╚══════════════════════════════════════════════════════════╝"
