@@ -51,8 +51,8 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           pmbootstrap --version
           
-          # Patch pmbootstrap's core command execution module (pmb/helpers/run_core.py) 
-          # to intercept any 'apk add' or 'apk.static add' command and inject '--allow-untrusted'.
+          # Patch pmbootstrap core command runner (pmb/helpers/run_core.py)
+          # to intercept apk add and apk.static add commands and inject --allow-untrusted.
           python3 -c '
           import pmb.helpers.run_core as rc
           import inspect
@@ -60,21 +60,21 @@ jobs:
           print("Locating run_core.py:", run_core_file)
           with open(run_core_file, "r") as f:
               code = f.read()
-          target = "sanity_checks(output, output_return, check)"
-          patch = """sanity_checks(output, output_return, check)
-      import os
-      cmd = [os.fspath(c) for c in cmd]
-      if any(p == "apk" or "apk.static" in p or p.endswith("/apk") for p in cmd) and "add" in cmd:
-          if "--allow-untrusted" not in cmd:
-              idx = cmd.index("add")
-              cmd.insert(idx + 1, "--allow-untrusted")"""
+          target = "    sanity_checks(output, output_return, check)"
+          patch = """    sanity_checks(output, output_return, check)
+    import os
+    cmd = [os.fspath(c) for c in cmd]
+    if any(p == "apk" or "apk.static" in p or p.endswith("/apk") for p in cmd) and "add" in cmd:
+        if "--allow-untrusted" not in cmd:
+            idx = cmd.index("add")
+            cmd.insert(idx + 1, "--allow-untrusted")"""
           if target in code:
               code = code.replace(target, patch)
               with open(run_core_file, "w") as f:
                   f.write(code)
-              print("✅ Successfully patched run_core.py to allow untrusted packages!")
+              print("Successfully patched run_core.py to allow untrusted packages!")
           else:
-              print("❌ Failed to patch run_core.py: target string not found!")
+              print("Failed to patch run_core.py: target string not found!")
               exit(1)
           '
           echo "✅ pmbootstrap installed and patched"
