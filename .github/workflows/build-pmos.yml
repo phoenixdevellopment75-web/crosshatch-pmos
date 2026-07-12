@@ -46,7 +46,7 @@ jobs:
       - name: Install pmbootstrap
         run: |
           set -euo pipefail
-          pip3 install --user pmbootstrap
+          pip3 install --user git+https://gitlab.postmarketos.org/postmarketOS/pmbootstrap.git
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           export PATH="$HOME/.local/bin:$PATH"
           pmbootstrap --version
