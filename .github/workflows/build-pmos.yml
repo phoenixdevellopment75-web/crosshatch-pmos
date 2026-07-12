@@ -118,12 +118,12 @@ jobs:
           # Create abuild config dir (pmbootstrap mounts this as mnt/pmbootstrap/abuild-config)
           mkdir -p "$WORK_DIR/config_abuild"
 
-          # Write private key
-          echo "$PMOS_SIGNING_KEY" | base64 -d > "$WORK_DIR/config_abuild/${KEY_NAME}"
+          # Write private key (stored as raw PEM in secret)
+          printf '%s' "$PMOS_SIGNING_KEY" > "$WORK_DIR/config_abuild/${KEY_NAME}"
           chmod 600 "$WORK_DIR/config_abuild/${KEY_NAME}"
 
-          # Write public key
-          echo "$PMOS_SIGNING_KEY_PUB" > "$WORK_DIR/config_abuild/${KEY_NAME}.pub"
+          # Write public key (stored as raw PEM in secret)
+          printf '%s' "$PMOS_SIGNING_KEY_PUB" > "$WORK_DIR/config_abuild/${KEY_NAME}.pub"
           chmod 644 "$WORK_DIR/config_abuild/${KEY_NAME}.pub"
 
           # Write abuild.conf so pmbootstrap sees keys as already generated
