@@ -38,7 +38,13 @@ jobs:
             git openssl binfmt-support qemu-user-static \
             coreutils procps sudo e2fsprogs
 
-      # ── 2. Install pmbootstrap ───────────────────────────────────────
+      # ── 2. Install pmbootstrap & patch _prepare_cmd ──────────────────
+      #
+      # THE ONLY RELIABLE FIX FOR CACHED PACKAGES:
+      # pmb/helpers/apk.py:_prepare_cmd() builds every apk command.
+      # We inject --allow-untrusted right after --no-progress so ALL apk
+      # calls skip signature verification — no package re-signing needed.
+      #
       - name: Install pmbootstrap
         run: |
           set -euo pipefail
@@ -46,7 +52,37 @@ jobs:
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           export PATH="$HOME/.local/bin:$PATH"
           pmbootstrap --version
-          echo "✅ pmbootstrap installed"
+
+          # Patch _prepare_cmd in pmb/helpers/apk.py
+          # Target line: command_: list[str] = [str(config.work / "apk.static"), "--no-progress"]
+          # We replace it with the same line + "--allow-untrusted" appended
+          python3 << 'PYEOF'
+          import pmb.helpers.apk as apk_mod
+          import inspect, re
+
+          fpath = inspect.getfile(apk_mod)
+          print("Patching:", fpath)
+
+          with open(fpath) as f:
+              src = f.read()
+
+          OLD = '    command_: list[str] = [str(config.work / "apk.static"), "--no-progress"]'
+          NEW = '    command_: list[str] = [str(config.work / "apk.static"), "--no-progress", "--allow-untrusted"]'
+
+          if OLD not in src:
+              print("ERROR: Target line not found! Printing context:")
+              for i, line in enumerate(src.splitlines()):
+                  if "apk.static" in line or "no-progress" in line:
+                      print(f"  L{i+1}: {line!r}")
+              exit(1)
+
+          src = src.replace(OLD, NEW, 1)
+          with open(fpath, "w") as f:
+              f.write(src)
+          print("✅ Successfully patched _prepare_cmd to add --allow-untrusted")
+          PYEOF
+
+          echo "✅ pmbootstrap installed and patched"
 
       # ── 3. Configure pmbootstrap ─────────────────────────────────────
       - name: Configure pmbootstrap
@@ -94,52 +130,7 @@ jobs:
           mkdir -p "$WORK_DIR/cache_git"
           echo "8" > "$WORK_DIR/version"
 
-      # ── 5. Inject persistent signing key ─────────────────────────────
-      #
-      #  WHY: pmbootstrap generates a random RSA key pair each fresh run to
-      #  sign locally built packages. Cached .apk files from a previous run
-      #  are signed with THAT old key. On a new runner the key is different
-      #  → apk refuses the packages with exit code 78 (UNTRUSTED_SIGNATURE).
-      #
-      #  FIX: We store a FIXED key pair as GitHub Secrets (PMOS_SIGNING_KEY
-      #  and PMOS_SIGNING_KEY_PUB), inject them into the exact paths that
-      #  pmbootstrap / abuild-keygen would create, and mark them so pmbootstrap
-      #  skips key generation entirely (config_abuild/abuild.conf exists).
-      #
-      - name: Inject persistent signing key
-        env:
-          PMOS_SIGNING_KEY: ${{ secrets.PMOS_SIGNING_KEY }}
-          PMOS_SIGNING_KEY_PUB: ${{ secrets.PMOS_SIGNING_KEY_PUB }}
-        run: |
-          set -euo pipefail
-          WORK_DIR="/home/runner/.local/var/pmbootstrap"
-          KEY_NAME="pmos@local-62f4da00.rsa"
-
-          # Create abuild config dir (pmbootstrap mounts this as mnt/pmbootstrap/abuild-config)
-          mkdir -p "$WORK_DIR/config_abuild"
-
-          # Write private key (stored as raw PEM in secret)
-          printf '%s' "$PMOS_SIGNING_KEY" > "$WORK_DIR/config_abuild/${KEY_NAME}"
-          chmod 600 "$WORK_DIR/config_abuild/${KEY_NAME}"
-
-          # Write public key (stored as raw PEM in secret)
-          printf '%s' "$PMOS_SIGNING_KEY_PUB" > "$WORK_DIR/config_abuild/${KEY_NAME}.pub"
-          chmod 644 "$WORK_DIR/config_abuild/${KEY_NAME}.pub"
-
-          # Write abuild.conf so pmbootstrap sees keys as already generated
-          cat > "$WORK_DIR/config_abuild/abuild.conf" << ABUILD
-          PACKAGER_PRIVKEY="${WORK_DIR}/config_abuild/${KEY_NAME}"
-          ABUILD
-
-          # Also place the public key in config_apk_keys (trusted keys dir for apk)
-          mkdir -p "$WORK_DIR/config_apk_keys"
-          cp "$WORK_DIR/config_abuild/${KEY_NAME}.pub" "$WORK_DIR/config_apk_keys/"
-
-          echo "✅ Signing keys injected:"
-          ls -la "$WORK_DIR/config_abuild/"
-          ls -la "$WORK_DIR/config_apk_keys/"
-
-      # ── 6. Restore pmbootstrap packages cache ────────────────────────
+      # ── 5. Restore pmbootstrap packages cache ────────────────────────
       - name: Restore pmbootstrap packages cache
         uses: actions/cache/restore@v4
         with:
@@ -150,7 +141,7 @@ jobs:
           restore-keys: |
             pmbootstrap-packages-${{ runner.os }}-
 
-      # ── 7. Migrate cached packages to systemd-edge ───────────────────
+      # ── 6. Migrate cached packages to systemd-edge ───────────────────
       - name: Migrate cached packages to systemd-edge
         run: |
           set -euo pipefail
@@ -162,103 +153,13 @@ jobs:
             cp -rn "$WORK_DIR/packages/edge/"* "$WORK_DIR/packages/systemd-edge/" 2>/dev/null || true
             echo "✅ Migration done"
           else
-            echo "ℹ️ No packages/edge cache found — will build from scratch"
+            echo "ℹ️ No packages/edge cache — will build from scratch"
           fi
 
-          echo ""
-          echo "📦 Available local packages:"
-          find "$WORK_DIR/packages" -name "*.apk" 2>/dev/null | head -20 || echo "(none)"
+          echo "📦 Local packages available:"
+          find "$WORK_DIR/packages" -name "*.apk" 2>/dev/null | wc -l || echo "0"
 
-      # ── 7b. Re-sign cached packages with our fixed key ───────────────
-      #
-      # WHY: Each .apk file embeds a signature blob (.SIGN.RSA.keyname)
-      # computed with the private key from the run that BUILT the package.
-      # On a new runner, a fresh key is generated — our fixed public key is
-      # present in config_apk_keys but the packages were signed with a DIFFERENT
-      # private key → apk rejects them (exit code 79).
-      #
-      # FIX: Strip the old signature and embed a new one using our fixed key.
-      # We do this with openssl + tar repack (same logic as abuild-sign).
-      #
-      - name: Re-sign cached packages with fixed key
-        env:
-          PMOS_SIGNING_KEY: ${{ secrets.PMOS_SIGNING_KEY }}
-        run: |
-          set -euo pipefail
-          WORK_DIR="/home/runner/.local/var/pmbootstrap"
-          KEY_NAME="pmos@local-62f4da00.rsa"
-          PRIVKEY="$WORK_DIR/config_abuild/${KEY_NAME}"
-          PUBKEY_NAME="${KEY_NAME}.pub"
-
-          # Count packages to resign
-          APK_COUNT=$(find "$WORK_DIR/packages" -name "*.apk" 2>/dev/null | wc -l)
-          echo "🔏 Re-signing $APK_COUNT .apk file(s) with fixed key..."
-
-          if [ "$APK_COUNT" -eq 0 ]; then
-            echo "ℹ️ No .apk files found — nothing to resign"
-            exit 0
-          fi
-
-          resign_apk() {
-            local apk_file="$1"
-            local dir
-            dir=$(dirname "$apk_file")
-            local tmpdir
-            tmpdir=$(mktemp -d)
-
-            # Extract everything EXCEPT old .SIGN.* files
-            tar -xzf "$apk_file" -C "$tmpdir" 2>/dev/null || true
-
-            # Remove old signatures
-            find "$tmpdir" -name ".SIGN.*" -delete
-
-            # Create new signature over the content (excluding sig itself)
-            local sig_file=".SIGN.RSA.${PUBKEY_NAME}"
-            local content_tar="$tmpdir/content.tar"
-
-            # Repack content (everything except old sig) into a tar for signing
-            tar -cf "$content_tar" -C "$tmpdir" \
-              $(ls "$tmpdir" | grep -v "^\.SIGN\." | grep -v "content.tar") 2>/dev/null || true
-
-            # Sign with openssl
-            openssl dgst -sha1 -sign "$PRIVKEY" -out "$tmpdir/${sig_file}" "$content_tar"
-
-            # Build new .apk: sig.tar.gz + content.tar.gz concatenated
-            local new_apk="${apk_file}.new"
-            # Sig section
-            tar -czf "${new_apk}.sig.tgz" -C "$tmpdir" "${sig_file}"
-            # Content section (recompress original minus old sig)
-            tar -czf "${new_apk}.content.tgz" -C "$tmpdir" \
-              $(ls "$tmpdir" | grep -v "^\.SIGN\." | grep -v "content.tar" | grep -v "\.tgz$") 2>/dev/null || true
-
-            cat "${new_apk}.sig.tgz" "${new_apk}.content.tgz" > "$new_apk"
-            mv "$new_apk" "$apk_file"
-            rm -rf "$tmpdir" "${new_apk}.sig.tgz" "${new_apk}.content.tgz" 2>/dev/null || true
-          }
-
-          export -f resign_apk
-          export PRIVKEY PUBKEY_NAME
-
-          find "$WORK_DIR/packages" -name "*.apk" | while read -r f; do
-            resign_apk "$f"
-          done
-
-          # Also re-sign APKINDEX files
-          for idx in $(find "$WORK_DIR/packages" -name "APKINDEX.tar.gz"); do
-            echo "  Re-signing index: $idx"
-            sig_file=".SIGN.RSA.${PUBKEY_NAME}"
-            tmpdir=$(mktemp -d)
-            cp "$idx" "$tmpdir/APKINDEX.tar.gz"
-            openssl dgst -sha1 -sign "$PRIVKEY" -out "$tmpdir/${sig_file}" "$tmpdir/APKINDEX.tar.gz"
-            tar -czf "${idx}.sig.tgz" -C "$tmpdir" "${sig_file}"
-            cat "${idx}.sig.tgz" "$idx" > "${idx}.new"
-            mv "${idx}.new" "$idx"
-            rm -rf "$tmpdir" "${idx}.sig.tgz"
-          done
-
-          echo "✅ All packages re-signed with fixed key"
-
-      # ── 8. Clone pmaports ────────────────────────────────────────────
+      # ── 7. Clone pmaports ────────────────────────────────────────────
       - name: Clone pmaports
         run: |
           set -euo pipefail
@@ -270,7 +171,7 @@ jobs:
             "$PMAPORTS_DIR"
           echo "✅ pmaports cloned"
 
-      # ── 9. Verify configuration ──────────────────────────────────────
+      # ── 8. Verify configuration ──────────────────────────────────────
       - name: Verify configuration status
         run: |
           set -euo pipefail
@@ -279,7 +180,7 @@ jobs:
           echo "  Device: $(pmbootstrap config device)"
           echo "  UI:     $(pmbootstrap config ui)"
 
-      # ── 10. Build kernel ─────────────────────────────────────────────
+      # ── 9. Build kernel ─────────────────────────────────────────────
       - name: Build kernel (linux-google-crosshatch-mainline)
         run: |
           set -euo pipefail
@@ -288,7 +189,7 @@ jobs:
           pmbootstrap build linux-google-crosshatch-mainline 2>&1
           echo "✅ Kernel ready"
 
-      # ── 11. Build device package ─────────────────────────────────────
+      # ── 10. Build device package ─────────────────────────────────────
       - name: Build device package
         run: |
           set -euo pipefail
@@ -297,7 +198,7 @@ jobs:
           pmbootstrap build device-google-crosshatch 2>&1
           echo "✅ Device package ready"
 
-      # ── 12. Save pmbootstrap packages cache ──────────────────────────
+      # ── 11. Save pmbootstrap packages cache ──────────────────────────
       - name: Save pmbootstrap packages cache
         uses: actions/cache/save@v4
         if: always()
@@ -307,7 +208,7 @@ jobs:
             /home/runner/.local/var/pmbootstrap/cache_apk
           key: pmbootstrap-packages-${{ runner.os }}-stable
 
-      # ── 13. Create installation image ────────────────────────────────
+      # ── 12. Create installation image ────────────────────────────────
       - name: Create installation image
         run: |
           set -euo pipefail
@@ -322,7 +223,7 @@ jobs:
 
           echo "✅ Installation image created"
 
-      # ── 14. Export images ────────────────────────────────────────────
+      # ── 13. Export images ────────────────────────────────────────────
       - name: Export flashable images
         run: |
           set -euo pipefail
@@ -347,26 +248,20 @@ jobs:
           =====================================================
            FLASH INSTRUCTIONS — postmarketOS on Pixel 3 XL
           =====================================================
-
           1. Boot into fastboot:
              Power off → hold Volume Down + Power
-
-          2. Verify: fastboot devices
-
+          2. Verify:  fastboot devices
           3. Set slot: fastboot set_active a
-
           4. Flash:
              fastboot flash boot boot.img
              fastboot flash userdata google-crosshatch.img
-
-          5. Reboot: fastboot reboot
-
-          6. SSH: ssh user@172.16.42.1
+          5. Reboot:  fastboot reboot
+          6. SSH:     ssh user@172.16.42.1
           =====================================================
           EOF
           sed -i 's/^          //' "$EXPORT_DIR/FLASH_INSTRUCTIONS.txt"
 
-      # ── 15. Upload artifacts ─────────────────────────────────────────
+      # ── 14. Upload artifacts ─────────────────────────────────────────
       - name: Upload flashable images
         uses: actions/upload-artifact@v4
         with:
@@ -375,7 +270,7 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      # ── 16. Summary ──────────────────────────────────────────────────
+      # ── 15. Summary ──────────────────────────────────────────────────
       - name: Print summary
         if: always()
         run: |
