@@ -169,6 +169,95 @@ jobs:
           echo "📦 Available local packages:"
           find "$WORK_DIR/packages" -name "*.apk" 2>/dev/null | head -20 || echo "(none)"
 
+      # ── 7b. Re-sign cached packages with our fixed key ───────────────
+      #
+      # WHY: Each .apk file embeds a signature blob (.SIGN.RSA.keyname)
+      # computed with the private key from the run that BUILT the package.
+      # On a new runner, a fresh key is generated — our fixed public key is
+      # present in config_apk_keys but the packages were signed with a DIFFERENT
+      # private key → apk rejects them (exit code 79).
+      #
+      # FIX: Strip the old signature and embed a new one using our fixed key.
+      # We do this with openssl + tar repack (same logic as abuild-sign).
+      #
+      - name: Re-sign cached packages with fixed key
+        env:
+          PMOS_SIGNING_KEY: ${{ secrets.PMOS_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          WORK_DIR="/home/runner/.local/var/pmbootstrap"
+          KEY_NAME="pmos@local-62f4da00.rsa"
+          PRIVKEY="$WORK_DIR/config_abuild/${KEY_NAME}"
+          PUBKEY_NAME="${KEY_NAME}.pub"
+
+          # Count packages to resign
+          APK_COUNT=$(find "$WORK_DIR/packages" -name "*.apk" 2>/dev/null | wc -l)
+          echo "🔏 Re-signing $APK_COUNT .apk file(s) with fixed key..."
+
+          if [ "$APK_COUNT" -eq 0 ]; then
+            echo "ℹ️ No .apk files found — nothing to resign"
+            exit 0
+          fi
+
+          resign_apk() {
+            local apk_file="$1"
+            local dir
+            dir=$(dirname "$apk_file")
+            local tmpdir
+            tmpdir=$(mktemp -d)
+
+            # Extract everything EXCEPT old .SIGN.* files
+            tar -xzf "$apk_file" -C "$tmpdir" 2>/dev/null || true
+
+            # Remove old signatures
+            find "$tmpdir" -name ".SIGN.*" -delete
+
+            # Create new signature over the content (excluding sig itself)
+            local sig_file=".SIGN.RSA.${PUBKEY_NAME}"
+            local content_tar="$tmpdir/content.tar"
+
+            # Repack content (everything except old sig) into a tar for signing
+            tar -cf "$content_tar" -C "$tmpdir" \
+              $(ls "$tmpdir" | grep -v "^\.SIGN\." | grep -v "content.tar") 2>/dev/null || true
+
+            # Sign with openssl
+            openssl dgst -sha1 -sign "$PRIVKEY" -out "$tmpdir/${sig_file}" "$content_tar"
+
+            # Build new .apk: sig.tar.gz + content.tar.gz concatenated
+            local new_apk="${apk_file}.new"
+            # Sig section
+            tar -czf "${new_apk}.sig.tgz" -C "$tmpdir" "${sig_file}"
+            # Content section (recompress original minus old sig)
+            tar -czf "${new_apk}.content.tgz" -C "$tmpdir" \
+              $(ls "$tmpdir" | grep -v "^\.SIGN\." | grep -v "content.tar" | grep -v "\.tgz$") 2>/dev/null || true
+
+            cat "${new_apk}.sig.tgz" "${new_apk}.content.tgz" > "$new_apk"
+            mv "$new_apk" "$apk_file"
+            rm -rf "$tmpdir" "${new_apk}.sig.tgz" "${new_apk}.content.tgz" 2>/dev/null || true
+          }
+
+          export -f resign_apk
+          export PRIVKEY PUBKEY_NAME
+
+          find "$WORK_DIR/packages" -name "*.apk" | while read -r f; do
+            resign_apk "$f"
+          done
+
+          # Also re-sign APKINDEX files
+          for idx in $(find "$WORK_DIR/packages" -name "APKINDEX.tar.gz"); do
+            echo "  Re-signing index: $idx"
+            sig_file=".SIGN.RSA.${PUBKEY_NAME}"
+            tmpdir=$(mktemp -d)
+            cp "$idx" "$tmpdir/APKINDEX.tar.gz"
+            openssl dgst -sha1 -sign "$PRIVKEY" -out "$tmpdir/${sig_file}" "$tmpdir/APKINDEX.tar.gz"
+            tar -czf "${idx}.sig.tgz" -C "$tmpdir" "${sig_file}"
+            cat "${idx}.sig.tgz" "$idx" > "${idx}.new"
+            mv "${idx}.new" "$idx"
+            rm -rf "$tmpdir" "${idx}.sig.tgz"
+          done
+
+          echo "✅ All packages re-signed with fixed key"
+
       # ── 8. Clone pmaports ────────────────────────────────────────────
       - name: Clone pmaports
         run: |
