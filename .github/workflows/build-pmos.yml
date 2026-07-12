@@ -20,10 +20,6 @@ on:
         description: 'User password for SSH login'
         required: true
         default: 'pixel3xl'
-      extra_packages:
-        description: 'Extra packages (comma-separated)'
-        required: false
-        default: 'vim,htop,tmux,nano,networkmanager'
 
 jobs:
   build:
@@ -52,7 +48,7 @@ jobs:
           pmbootstrap --version
           echo "✅ pmbootstrap installed"
 
-      # ── 3. Configure pmbootstrap (non-interactive) ───────────────────
+      # ── 3. Configure pmbootstrap ─────────────────────────────────────
       - name: Configure pmbootstrap
         run: |
           set -euo pipefail
@@ -88,105 +84,131 @@ jobs:
           EOF
 
           sed -i 's/^          //' "$CONFIG_DIR/pmbootstrap_v3.cfg"
-          echo "📄 Config file:"
-          cat "$CONFIG_DIR/pmbootstrap_v3.cfg"
-          echo "✅ pmbootstrap configured for google-crosshatch"
+          echo "✅ pmbootstrap configured"
 
       # ── 4. Pre-initialize workdir ───────────────────────────────────
       - name: Pre-initialize workdir
         run: |
           set -euo pipefail
           WORK_DIR="/home/runner/.local/var/pmbootstrap"
-          mkdir -p "$WORK_DIR"
           mkdir -p "$WORK_DIR/cache_git"
           echo "8" > "$WORK_DIR/version"
-          echo "Version file created with content: 8"
 
-      # ── 5. Restore pmbootstrap packages + signing key cache ──────────
+      # ── 5. Inject persistent signing key ─────────────────────────────
+      #
+      #  WHY: pmbootstrap generates a random RSA key pair each fresh run to
+      #  sign locally built packages. Cached .apk files from a previous run
+      #  are signed with THAT old key. On a new runner the key is different
+      #  → apk refuses the packages with exit code 78 (UNTRUSTED_SIGNATURE).
+      #
+      #  FIX: We store a FIXED key pair as GitHub Secrets (PMOS_SIGNING_KEY
+      #  and PMOS_SIGNING_KEY_PUB), inject them into the exact paths that
+      #  pmbootstrap / abuild-keygen would create, and mark them so pmbootstrap
+      #  skips key generation entirely (config_abuild/abuild.conf exists).
+      #
+      - name: Inject persistent signing key
+        env:
+          PMOS_SIGNING_KEY: ${{ secrets.PMOS_SIGNING_KEY }}
+          PMOS_SIGNING_KEY_PUB: ${{ secrets.PMOS_SIGNING_KEY_PUB }}
+        run: |
+          set -euo pipefail
+          WORK_DIR="/home/runner/.local/var/pmbootstrap"
+          KEY_NAME="pmos@local-62f4da00.rsa"
+
+          # Create abuild config dir (pmbootstrap mounts this as mnt/pmbootstrap/abuild-config)
+          mkdir -p "$WORK_DIR/config_abuild"
+
+          # Write private key
+          echo "$PMOS_SIGNING_KEY" | base64 -d > "$WORK_DIR/config_abuild/${KEY_NAME}"
+          chmod 600 "$WORK_DIR/config_abuild/${KEY_NAME}"
+
+          # Write public key
+          echo "$PMOS_SIGNING_KEY_PUB" > "$WORK_DIR/config_abuild/${KEY_NAME}.pub"
+          chmod 644 "$WORK_DIR/config_abuild/${KEY_NAME}.pub"
+
+          # Write abuild.conf so pmbootstrap sees keys as already generated
+          cat > "$WORK_DIR/config_abuild/abuild.conf" << ABUILD
+          PACKAGER_PRIVKEY="${WORK_DIR}/config_abuild/${KEY_NAME}"
+          ABUILD
+
+          # Also place the public key in config_apk_keys (trusted keys dir for apk)
+          mkdir -p "$WORK_DIR/config_apk_keys"
+          cp "$WORK_DIR/config_abuild/${KEY_NAME}.pub" "$WORK_DIR/config_apk_keys/"
+
+          echo "✅ Signing keys injected:"
+          ls -la "$WORK_DIR/config_abuild/"
+          ls -la "$WORK_DIR/config_apk_keys/"
+
+      # ── 6. Restore pmbootstrap packages cache ────────────────────────
       - name: Restore pmbootstrap packages cache
         uses: actions/cache/restore@v4
         with:
           path: |
             /home/runner/.local/var/pmbootstrap/packages
             /home/runner/.local/var/pmbootstrap/cache_apk
-            /home/runner/.local/var/pmbootstrap/config_apk_keys
-          key: pmbootstrap-packages-${{ runner.os }}-${{ github.sha }}
+          key: pmbootstrap-packages-${{ runner.os }}-stable
           restore-keys: |
             pmbootstrap-packages-${{ runner.os }}-
 
-      # ── 6. Copy cached edge packages to systemd-edge ─────────────────
+      # ── 7. Migrate cached packages to systemd-edge ───────────────────
       - name: Migrate cached packages to systemd-edge
         run: |
           set -euo pipefail
           WORK_DIR="/home/runner/.local/var/pmbootstrap"
 
           if [ -d "$WORK_DIR/packages/edge" ]; then
-            echo "📋 Migrating cached edge packages to systemd-edge..."
+            echo "📋 Migrating cached packages from edge → systemd-edge..."
             mkdir -p "$WORK_DIR/packages/systemd-edge"
-            cp -r "$WORK_DIR/packages/edge/"* "$WORK_DIR/packages/systemd-edge/" || true
-            echo "✅ Packages migrated"
+            cp -rn "$WORK_DIR/packages/edge/"* "$WORK_DIR/packages/systemd-edge/" 2>/dev/null || true
+            echo "✅ Migration done"
           else
-            echo "ℹ️ No cached packages found under edge/"
+            echo "ℹ️ No packages/edge cache found — will build from scratch"
           fi
 
-          # Show what signing keys we have from the cache
           echo ""
-          echo "🔑 Signing keys in config_apk_keys:"
-          ls -la "$WORK_DIR/config_apk_keys/" 2>/dev/null || echo "(none restored from cache)"
+          echo "📦 Available local packages:"
+          find "$WORK_DIR/packages" -name "*.apk" 2>/dev/null | head -20 || echo "(none)"
 
-      # ── 7. Clone pmaports ────────────────────────────────────────────
+      # ── 8. Clone pmaports ────────────────────────────────────────────
       - name: Clone pmaports
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
           PMAPORTS_DIR="/home/runner/.local/var/pmbootstrap/cache_git/pmaports"
 
-          echo "📥 Cloning pmaports..."
           git clone --depth=1 \
             https://gitlab.postmarketos.org/postmarketOS/pmaports.git \
             "$PMAPORTS_DIR"
-
           echo "✅ pmaports cloned"
 
-      # ── 8. Verify configuration status ──────────────────────────────
+      # ── 9. Verify configuration ──────────────────────────────────────
       - name: Verify configuration status
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
-
-          echo "🔧 Running pmbootstrap status..."
           pmbootstrap status
-
-          echo ""
-          echo "📋 Final configuration:"
           echo "  Device: $(pmbootstrap config device)"
           echo "  UI:     $(pmbootstrap config ui)"
-          echo "  Work:   $(pmbootstrap config work)"
-          echo "✅ Configuration verified successfully"
 
-      # ── 9. Build kernel ─────────────────────────────────────────────
+      # ── 10. Build kernel ─────────────────────────────────────────────
       - name: Build kernel (linux-google-crosshatch-mainline)
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
-
-          echo "🔨 Building linux-google-crosshatch-mainline (uses cache if available)..."
+          echo "🔨 Building kernel (uses cache if available)..."
           pmbootstrap build linux-google-crosshatch-mainline 2>&1
+          echo "✅ Kernel ready"
 
-          echo "✅ Kernel built/found in cache"
-
-      # ── 10. Build device package ─────────────────────────────────────
+      # ── 11. Build device package ─────────────────────────────────────
       - name: Build device package
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
-
-          echo "📦 Building device-google-crosshatch (uses cache if available)..."
+          echo "📦 Building device package (uses cache if available)..."
           pmbootstrap build device-google-crosshatch 2>&1
+          echo "✅ Device package ready"
 
-          echo "✅ device-google-crosshatch built/found in cache"
-
-      # ── 11. Save pmbootstrap packages + signing key cache ─────────────
+      # ── 12. Save pmbootstrap packages cache ──────────────────────────
       - name: Save pmbootstrap packages cache
         uses: actions/cache/save@v4
         if: always()
@@ -194,33 +216,24 @@ jobs:
           path: |
             /home/runner/.local/var/pmbootstrap/packages
             /home/runner/.local/var/pmbootstrap/cache_apk
-            /home/runner/.local/var/pmbootstrap/config_apk_keys
-          key: pmbootstrap-packages-${{ runner.os }}-${{ github.sha }}
+          key: pmbootstrap-packages-${{ runner.os }}-stable
 
-      # ── 12. Create installation image ────────────────────────────────
+      # ── 13. Create installation image ────────────────────────────────
       - name: Create installation image
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
 
-          echo "========================================="
-          echo "💾 Running pmbootstrap install"
-          echo "========================================="
-
-          # Show keys before running — must match the ones used to sign packages
-          WORK_DIR="/home/runner/.local/var/pmbootstrap"
-          echo "🔑 Keys available to apk:"
-          ls -la "$WORK_DIR/config_apk_keys/" 2>/dev/null || echo "(no keys)"
+          echo "💾 Running pmbootstrap install..."
 
           printf '%s\n%s\n' \
             "${{ github.event.inputs.user_password || 'pixel3xl' }}" \
             "${{ github.event.inputs.user_password || 'pixel3xl' }}" | \
           pmbootstrap install --no-fde 2>&1
 
-          echo ""
           echo "✅ Installation image created"
 
-      # ── 13. Export images ────────────────────────────────────────────
+      # ── 14. Export images ────────────────────────────────────────────
       - name: Export flashable images
         run: |
           set -euo pipefail
@@ -229,20 +242,17 @@ jobs:
           EXPORT_DIR="/tmp/pmos-images"
           mkdir -p "$EXPORT_DIR"
 
-          echo "📤 Exporting images..."
           pmbootstrap export "$EXPORT_DIR" 2>&1
 
-          echo ""
           echo "📂 Exported files:"
           ls -lah "$EXPORT_DIR/"
 
           IMG_COUNT=$(find "$EXPORT_DIR" -name "*.img" -size +1M | wc -l)
           if [ "$IMG_COUNT" -eq 0 ]; then
-            echo "❌ ERROR: No .img files found larger than 1MB!"
+            echo "❌ ERROR: No .img files found!"
             exit 1
           fi
-
-          echo "✅ Found $IMG_COUNT image file(s) ready to flash"
+          echo "✅ Found $IMG_COUNT image file(s)"
 
           cat > "$EXPORT_DIR/FLASH_INSTRUCTIONS.txt" << 'EOF'
           =====================================================
@@ -265,10 +275,9 @@ jobs:
           6. SSH: ssh user@172.16.42.1
           =====================================================
           EOF
-
           sed -i 's/^          //' "$EXPORT_DIR/FLASH_INSTRUCTIONS.txt"
 
-      # ── 14. Upload artifacts ─────────────────────────────────────────
+      # ── 15. Upload artifacts ─────────────────────────────────────────
       - name: Upload flashable images
         uses: actions/upload-artifact@v4
         with:
@@ -277,14 +286,13 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      # ── 15. Summary ──────────────────────────────────────────────────
+      # ── 16. Summary ──────────────────────────────────────────────────
       - name: Print summary
         if: always()
         run: |
           echo ""
           echo "╔══════════════════════════════════════════════════╗"
-          echo "║  BUILD COMPLETE                                  ║"
-          echo "║  Device:  Pixel 3 XL (crosshatch)               ║"
-          echo "║  UI:      ${{ github.event.inputs.ui || 'plasma-mobile' }}          "
-          echo "║  Download artifact from the Actions tab          ║"
+          echo "║  BUILD COMPLETE — Pixel 3 XL (crosshatch)       ║"
+          echo "║  UI: ${{ github.event.inputs.ui || 'plasma-mobile' }}"
+          echo "║  Download the artifact from the Actions tab      ║"
           echo "╚══════════════════════════════════════════════════╝"
