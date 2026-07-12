@@ -1,6 +1,9 @@
 name: Build postmarketOS for Pixel 3 XL
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       ui:
