@@ -116,23 +116,24 @@ jobs:
 
           echo ""
           echo "📂 Verifying device package exists..."
-          ls -la "$PMAPORTS_DIR/device/archived/device-google-crosshatch/" || {
-            echo "❌ device-google-crosshatch not found in archived!"
-            echo "Searching all device dirs..."
-            find "$PMAPORTS_DIR/device" -name "*crosshatch*" -type d
+          DEVICE_PATH=$(find "$PMAPORTS_DIR/device" -name "device-google-crosshatch" -type d | head -n 1)
+          if [ -z "$DEVICE_PATH" ]; then
+            echo "❌ device-google-crosshatch package not found!"
             exit 1
-          }
+          fi
+          echo "Found device package at: $DEVICE_PATH"
 
           echo ""
           echo "📂 Verifying kernel package exists..."
-          ls -la "$PMAPORTS_DIR/device/community/linux-postmarketos-qcom-sdm845/" || {
-            echo "Searching for sdm845 kernel..."
-            find "$PMAPORTS_DIR/device" -name "*sdm845*" -type d
+          KERNEL_PATH=$(find "$PMAPORTS_DIR/device" -name "linux-postmarketos-qcom-sdm845" -type d | head -n 1)
+          if [ -z "$KERNEL_PATH" ]; then
+            echo "❌ linux-postmarketos-qcom-sdm845 package not found!"
             exit 1
-          }
+          fi
+          echo "Found kernel package at: $KERNEL_PATH"
 
           echo ""
-          echo "✅ pmaports cloned, device + kernel packages found"
+          echo "✅ pmaports cloned, device + kernel packages verified"
 
       # ── 5. Initialize pmbootstrap chroot ─────────────────────────────
       - name: Initialize pmbootstrap work directory
