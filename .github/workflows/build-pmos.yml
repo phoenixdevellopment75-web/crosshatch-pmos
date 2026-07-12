@@ -180,7 +180,7 @@ jobs:
           echo "If cached, this will complete instantly!"
           echo "========================================="
 
-          pmbootstrap build linux-google-crosshatch-mainline --force 2>&1
+          pmbootstrap build linux-google-crosshatch-mainline 2>&1
 
           echo ""
           echo "✅ Kernel built successfully"
@@ -196,7 +196,7 @@ jobs:
           echo "If cached, this will complete instantly!"
           echo "========================================="
 
-          pmbootstrap build device-google-crosshatch --force 2>&1
+          pmbootstrap build device-google-crosshatch 2>&1
 
           echo ""
           echo "✅ device-google-crosshatch built"
