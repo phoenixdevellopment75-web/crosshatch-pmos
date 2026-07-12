@@ -96,7 +96,32 @@ jobs:
           echo ""
           echo "✅ pmbootstrap configured for google-crosshatch"
 
-      # ── 4. Initialize pmbootstrap chroot ─────────────────────────────
+      # ── 4. Pre-initialize workdir and clone pmaports ─────────────────
+      - name: Pre-initialize workdir and clone pmaports
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+
+          WORK_DIR="/home/runner/.local/var/pmbootstrap"
+          PMAPORTS_DIR="$WORK_DIR/cache_git/pmaports"
+
+          echo "📁 Creating work directory..."
+          mkdir -p "$WORK_DIR"
+          mkdir -p "$WORK_DIR/cache_git"
+
+          # Write work folder version file (expects version 8 for pmbootstrap v3)
+          # to bypass the "Your work folder version needs to be migrated" check!
+          echo "8" > "$WORK_DIR/version"
+          echo "Version file created with content: 8"
+
+          echo "📥 Cloning pmaports (edge channel, shallow clone)..."
+          git clone --depth=1 \
+            https://gitlab.postmarketos.org/postmarketOS/pmaports.git \
+            "$PMAPORTS_DIR"
+
+          echo "✅ Pre-initialization complete"
+
+      # ── 5. Initialize pmbootstrap chroot ─────────────────────────────
       - name: Initialize pmbootstrap work directory
         run: |
           set -euo pipefail
@@ -107,9 +132,6 @@ jobs:
 
           echo ""
           echo "🔧 Setting up pmbootstrap keys and chroot..."
-          # Since the work directory /home/runner/.local/var/pmbootstrap does not exist yet,
-          # pmbootstrap init will cleanly initialize it, write .version file (version 8),
-          # and clone pmaports into cache_git/pmaports automatically.
           yes "" | pmbootstrap -q init
 
           echo ""
@@ -120,7 +142,7 @@ jobs:
           echo ""
           echo "✅ pmbootstrap initialized"
 
-      # ── 5. Build kernel (linux-google-crosshatch-mainline) ───────────
+      # ── 6. Build kernel (linux-google-crosshatch-mainline) ───────────
       - name: Build kernel (linux-google-crosshatch-mainline)
         run: |
           set -euo pipefail
@@ -136,7 +158,7 @@ jobs:
           echo ""
           echo "✅ Kernel built successfully"
 
-      # ── 6. Build device package ──────────────────────────────────────
+      # ── 7. Build device package ──────────────────────────────────────
       - name: Build device package
         run: |
           set -euo pipefail
@@ -151,7 +173,7 @@ jobs:
           echo ""
           echo "✅ device-google-crosshatch built"
 
-      # ── 7. Create installation image ─────────────────────────────────
+      # ── 8. Create installation image ─────────────────────────────────
       - name: Create installation image
         run: |
           set -euo pipefail
@@ -170,7 +192,7 @@ jobs:
           echo ""
           echo "✅ Installation image created"
 
-      # ── 8. Export images ─────────────────────────────────────────────
+      # ── 9. Export images ─────────────────────────────────────────────
       - name: Export flashable images
         run: |
           set -euo pipefail
@@ -225,7 +247,7 @@ jobs:
           # Remove leading whitespace (10 spaces)
           sed -i 's/^          //' "$EXPORT_DIR/FLASH_INSTRUCTIONS.txt"
 
-      # ── 9. Upload artifacts ──────────────────────────────────────────
+      # ── 10. Upload artifacts ─────────────────────────────────────────
       - name: Upload flashable images
         uses: actions/upload-artifact@v4
         with:
@@ -234,7 +256,7 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      # ── 10. Summary ──────────────────────────────────────────────────
+      # ── 11. Summary ──────────────────────────────────────────────────
       - name: Print summary
         if: always()
         run: |
