@@ -66,7 +66,7 @@ jobs:
           [pmbootstrap]
           aports = /home/runner/.local/var/pmbootstrap/cache_git/pmaports
           build_default_device_arch = True
-          boot_size = 256
+          boot_size = 512
           channel = edge
           device = google-crosshatch
           extra_space = 2048
@@ -96,32 +96,45 @@ jobs:
           echo ""
           echo "✅ pmbootstrap configured for google-crosshatch"
 
-      # ── 4. Pre-initialize workdir and clone pmaports ─────────────────
-      - name: Pre-initialize workdir and clone pmaports
+      # ── 4. Pre-initialize workdir ───────────────────────────────────
+      - name: Pre-initialize workdir
         run: |
           set -euo pipefail
-          export PATH="$HOME/.local/bin:$PATH"
-
           WORK_DIR="/home/runner/.local/var/pmbootstrap"
-          PMAPORTS_DIR="$WORK_DIR/cache_git/pmaports"
-
           echo "📁 Creating work directory..."
           mkdir -p "$WORK_DIR"
           mkdir -p "$WORK_DIR/cache_git"
 
           # Write work folder version file (expects version 8 for pmbootstrap v3)
-          # to bypass the "Your work folder version needs to be migrated" check!
           echo "8" > "$WORK_DIR/version"
           echo "Version file created with content: 8"
+
+      # ── 5. Restore pmbootstrap packages cache ────────────────────────
+      - name: Restore pmbootstrap packages cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            /home/runner/.local/var/pmbootstrap/packages
+            /home/runner/.local/var/pmbootstrap/cache_apk
+          key: pmbootstrap-packages-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            pmbootstrap-packages-${{ runner.os }}-
+
+      # ── 6. Clone pmaports ────────────────────────────────────────────
+      - name: Clone pmaports
+        run: |
+          set -euo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          PMAPORTS_DIR="/home/runner/.local/var/pmbootstrap/cache_git/pmaports"
 
           echo "📥 Cloning pmaports (edge channel, shallow clone)..."
           git clone --depth=1 \
             https://gitlab.postmarketos.org/postmarketOS/pmaports.git \
             "$PMAPORTS_DIR"
 
-          echo "✅ Pre-initialization complete"
+          echo "✅ pmaports cloned"
 
-      # ── 5. Verify configuration ──────────────────────────────────────
+      # ── 7. Verify configuration status ──────────────────────────────
       - name: Verify configuration status
         run: |
           set -euo pipefail
@@ -138,7 +151,7 @@ jobs:
           echo ""
           echo "✅ Configuration verified successfully"
 
-      # ── 6. Build kernel (linux-google-crosshatch-mainline) ───────────
+      # ── 8. Build kernel (linux-google-crosshatch-mainline) ───────────
       - name: Build kernel (linux-google-crosshatch-mainline)
         run: |
           set -euo pipefail
@@ -146,7 +159,7 @@ jobs:
 
           echo "========================================="
           echo "🔨 Building linux-google-crosshatch-mainline"
-          echo "This may take 20-40 minutes..."
+          echo "If cached, this will complete instantly!"
           echo "========================================="
 
           pmbootstrap build linux-google-crosshatch-mainline --force 2>&1
@@ -154,7 +167,7 @@ jobs:
           echo ""
           echo "✅ Kernel built successfully"
 
-      # ── 7. Build device package ──────────────────────────────────────
+      # ── 9. Build device package ──────────────────────────────────────
       - name: Build device package
         run: |
           set -euo pipefail
@@ -162,6 +175,7 @@ jobs:
 
           echo "========================================="
           echo "📦 Building device-google-crosshatch"
+          echo "If cached, this will complete instantly!"
           echo "========================================="
 
           pmbootstrap build device-google-crosshatch --force 2>&1
@@ -169,7 +183,17 @@ jobs:
           echo ""
           echo "✅ device-google-crosshatch built"
 
-      # ── 8. Create installation image ─────────────────────────────────
+      # ── 10. Save pmbootstrap packages cache ──────────────────────────
+      - name: Save pmbootstrap packages cache
+        uses: actions/cache/save@v4
+        if: always() # Save even if subsequent image building fails!
+        with:
+          path: |
+            /home/runner/.local/var/pmbootstrap/packages
+            /home/runner/.local/var/pmbootstrap/cache_apk
+          key: pmbootstrap-packages-${{ runner.os }}-${{ github.sha }}
+
+      # ── 11. Create installation image ────────────────────────────────
       - name: Create installation image
         run: |
           set -euo pipefail
@@ -188,7 +212,7 @@ jobs:
           echo ""
           echo "✅ Installation image created"
 
-      # ── 9. Export images ─────────────────────────────────────────────
+      # ── 12. Export images ────────────────────────────────────────────
       - name: Export flashable images
         run: |
           set -euo pipefail
@@ -243,7 +267,7 @@ jobs:
           # Remove leading whitespace (10 spaces)
           sed -i 's/^          //' "$EXPORT_DIR/FLASH_INSTRUCTIONS.txt"
 
-      # ── 10. Upload artifacts ─────────────────────────────────────────
+      # ── 13. Upload artifacts ─────────────────────────────────────────
       - name: Upload flashable images
         uses: actions/upload-artifact@v4
         with:
@@ -252,7 +276,7 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      # ── 11. Summary ──────────────────────────────────────────────────
+      # ── 14. Summary ──────────────────────────────────────────────────
       - name: Print summary
         if: always()
         run: |
