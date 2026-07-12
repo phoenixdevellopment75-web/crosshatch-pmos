@@ -58,9 +58,6 @@ jobs:
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
 
-          WORK_DIR="/home/runner/.local/var/pmbootstrap"
-          mkdir -p "$WORK_DIR"
-
           # Write config file directly — must be pmbootstrap_v3.cfg for pmbootstrap 3.x!
           CONFIG_DIR="$HOME/.config"
           mkdir -p "$CONFIG_DIR"
@@ -99,42 +96,7 @@ jobs:
           echo ""
           echo "✅ pmbootstrap configured for google-crosshatch"
 
-      # ── 4. Clone pmaports ────────────────────────────────────────────
-      - name: Clone pmaports repository
-        run: |
-          set -euo pipefail
-          export PATH="$HOME/.local/bin:$PATH"
-
-          WORK_DIR="/home/runner/.local/var/pmbootstrap"
-          PMAPORTS_DIR="$WORK_DIR/cache_git/pmaports"
-
-          echo "📥 Cloning pmaports (edge channel)..."
-          git clone --depth=1 \
-            https://gitlab.postmarketos.org/postmarketOS/pmaports.git \
-            "$PMAPORTS_DIR"
-
-          echo ""
-          echo "📂 Verifying device package exists..."
-          DEVICE_PATH=$(find "$PMAPORTS_DIR/device" -name "device-google-crosshatch" -type d | head -n 1)
-          if [ -z "$DEVICE_PATH" ]; then
-            echo "❌ device-google-crosshatch package not found!"
-            exit 1
-          fi
-          echo "Found device package at: $DEVICE_PATH"
-
-          echo ""
-          echo "📂 Verifying kernel package exists..."
-          KERNEL_PATH=$(find "$PMAPORTS_DIR/device" -name "linux-google-crosshatch-mainline" -type d | head -n 1)
-          if [ -z "$KERNEL_PATH" ]; then
-            echo "❌ linux-google-crosshatch-mainline package not found!"
-            exit 1
-          fi
-          echo "Found kernel package at: $KERNEL_PATH"
-
-          echo ""
-          echo "✅ pmaports cloned, device + kernel packages verified"
-
-      # ── 5. Initialize pmbootstrap chroot ─────────────────────────────
+      # ── 4. Initialize pmbootstrap chroot ─────────────────────────────
       - name: Initialize pmbootstrap work directory
         run: |
           set -euo pipefail
@@ -145,11 +107,10 @@ jobs:
 
           echo ""
           echo "🔧 Setting up pmbootstrap keys and chroot..."
-          yes "" | pmbootstrap -q init || {
-            echo "⚠️ pmbootstrap init had issues, checking if config is usable..."
-            pmbootstrap config device
-            pmbootstrap config ui
-          }
+          # Since the work directory /home/runner/.local/var/pmbootstrap does not exist yet,
+          # pmbootstrap init will cleanly initialize it, write .version file (version 8),
+          # and clone pmaports into cache_git/pmaports automatically.
+          yes "" | pmbootstrap -q init
 
           echo ""
           echo "📋 Final configuration:"
@@ -159,7 +120,7 @@ jobs:
           echo ""
           echo "✅ pmbootstrap initialized"
 
-      # ── 6. Build kernel (linux-google-crosshatch-mainline) ───────────
+      # ── 5. Build kernel (linux-google-crosshatch-mainline) ───────────
       - name: Build kernel (linux-google-crosshatch-mainline)
         run: |
           set -euo pipefail
@@ -175,7 +136,7 @@ jobs:
           echo ""
           echo "✅ Kernel built successfully"
 
-      # ── 7. Build device package ──────────────────────────────────────
+      # ── 6. Build device package ──────────────────────────────────────
       - name: Build device package
         run: |
           set -euo pipefail
@@ -190,7 +151,7 @@ jobs:
           echo ""
           echo "✅ device-google-crosshatch built"
 
-      # ── 8. Create installation image ─────────────────────────────────
+      # ── 7. Create installation image ─────────────────────────────────
       - name: Create installation image
         run: |
           set -euo pipefail
@@ -209,7 +170,7 @@ jobs:
           echo ""
           echo "✅ Installation image created"
 
-      # ── 9. Export images ─────────────────────────────────────────────
+      # ── 8. Export images ─────────────────────────────────────────────
       - name: Export flashable images
         run: |
           set -euo pipefail
@@ -264,7 +225,7 @@ jobs:
           # Remove leading whitespace (10 spaces)
           sed -i 's/^          //' "$EXPORT_DIR/FLASH_INSTRUCTIONS.txt"
 
-      # ── 10. Upload artifacts ─────────────────────────────────────────
+      # ── 9. Upload artifacts ──────────────────────────────────────────
       - name: Upload flashable images
         uses: actions/upload-artifact@v4
         with:
@@ -273,7 +234,7 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      # ── 11. Summary ─────────────────────────────────────────────────
+      # ── 10. Summary ──────────────────────────────────────────────────
       - name: Print summary
         if: always()
         run: |
