@@ -52,7 +52,8 @@ jobs:
           pmbootstrap --version
           
           # Patch pmbootstrap core command runner (pmb/helpers/run_core.py)
-          # to intercept apk add and apk.static add commands and inject --allow-untrusted.
+          # to intercept apk add and apk.static add commands (both list-based and shell-based)
+          # and inject --allow-untrusted.
           python3 -c '
           import pmb.helpers.run_core as rc
           import inspect
@@ -69,7 +70,12 @@ jobs:
               if any(p == "apk" or "apk.static" in p or p.endswith("/apk") for p in cmd) and "add" in cmd:
                   if "--allow-untrusted" not in cmd:
                       idx = cmd.index("add")
-                      cmd.insert(idx + 1, "--allow-untrusted")""")
+                      cmd.insert(idx + 1, "--allow-untrusted")
+              else:
+                  for idx, part in enumerate(cmd):
+                      if ("apk" in part or "apk.static" in part) and " add " in part:
+                          if "--allow-untrusted" not in part:
+                              cmd[idx] = part.replace(" add ", " add --allow-untrusted ", 1)""")
           patch = "    " + patch.replace("\n", "\n    ")
           if target in code:
               code = code.replace(target, patch)
