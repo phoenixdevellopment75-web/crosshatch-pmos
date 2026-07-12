@@ -42,15 +42,39 @@ jobs:
             git openssl binfmt-support qemu-user-static \
             coreutils procps sudo e2fsprogs
 
-      # ── 2. Install pmbootstrap ───────────────────────────────────────
-      - name: Install pmbootstrap
+      # ── 2. Install & Patch pmbootstrap ───────────────────────────────
+      - name: Install & Patch pmbootstrap
         run: |
           set -euo pipefail
           pip3 install --user git+https://gitlab.postmarketos.org/postmarketOS/pmbootstrap.git
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           export PATH="$HOME/.local/bin:$PATH"
           pmbootstrap --version
-          echo "✅ pmbootstrap installed"
+          
+          # Patch pmbootstrap command runner to allow untrusted signatures for cached packages!
+          python3 -c '
+          import pmb.helpers.run as r
+          import inspect
+          run_file = inspect.getfile(r)
+          print("Locating run.py:", run_file)
+          with open(run_file, "r") as f:
+              code = f.read()
+          target = "cmd_parts = [os.fspath(c) for c in cmd]"
+          patch = """cmd_parts = [os.fspath(c) for c in cmd]
+              if any(p == "apk" or "apk.static" in p or p.endswith("/apk") for p in cmd_parts) and "add" in cmd_parts:
+                  if "--allow-untrusted" not in cmd_parts:
+                      idx = cmd_parts.index("add")
+                      cmd_parts.insert(idx + 1, "--allow-untrusted")"""
+          if target in code:
+              code = code.replace(target, patch)
+              with open(run_file, "w") as f:
+                  f.write(code)
+              print("✅ Successfully patched run.py to allow untrusted packages!")
+          else:
+              print("❌ Failed to patch run.py: target string not found!")
+              exit(1)
+          '
+          echo "✅ pmbootstrap installed and patched"
 
       # ── 3. Configure pmbootstrap (non-interactive) ───────────────────
       - name: Configure pmbootstrap
