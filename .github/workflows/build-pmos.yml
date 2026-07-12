@@ -67,7 +67,7 @@ jobs:
           aports = /home/runner/.local/var/pmbootstrap/cache_git/pmaports
           build_default_device_arch = True
           boot_size = 512
-          channel = edge
+          channel = systemd-edge
           device = google-crosshatch
           extra_space = 2048
           hostname = pixel3xl
@@ -120,7 +120,25 @@ jobs:
           restore-keys: |
             pmbootstrap-packages-${{ runner.os }}-
 
-      # ── 6. Clone pmaports ────────────────────────────────────────────
+      # ── 6. Copy cached edge packages to systemd-edge ─────────────────
+      - name: Migrate cached packages to systemd-edge
+        run: |
+          set -euo pipefail
+          WORK_DIR="/home/runner/.local/var/pmbootstrap"
+          
+          # Since the previous run cached files under "packages/edge", 
+          # we copy them to "packages/systemd-edge" to bypass compilation.
+          if [ -d "$WORK_DIR/packages/edge" ]; then
+            echo "📋 Migrating cached edge packages to systemd-edge..."
+            mkdir -p "$WORK_DIR/packages/systemd-edge"
+            cp -r "$WORK_DIR/packages/edge/"* "$WORK_DIR/packages/systemd-edge/" || true
+            echo "✅ Packages migrated:"
+            find "$WORK_DIR/packages/systemd-edge" -name "*.apk" || echo "No apk files found"
+          else
+            echo "ℹ️ No cached packages found under edge/"
+          fi
+
+      # ── 7. Clone pmaports ────────────────────────────────────────────
       - name: Clone pmaports
         run: |
           set -euo pipefail
@@ -134,7 +152,7 @@ jobs:
 
           echo "✅ pmaports cloned"
 
-      # ── 7. Verify configuration status ──────────────────────────────
+      # ── 8. Verify configuration status ──────────────────────────────
       - name: Verify configuration status
         run: |
           set -euo pipefail
@@ -151,7 +169,7 @@ jobs:
           echo ""
           echo "✅ Configuration verified successfully"
 
-      # ── 8. Build kernel (linux-google-crosshatch-mainline) ───────────
+      # ── 9. Build kernel (linux-google-crosshatch-mainline) ───────────
       - name: Build kernel (linux-google-crosshatch-mainline)
         run: |
           set -euo pipefail
@@ -167,7 +185,7 @@ jobs:
           echo ""
           echo "✅ Kernel built successfully"
 
-      # ── 9. Build device package ──────────────────────────────────────
+      # ── 10. Build device package ─────────────────────────────────────
       - name: Build device package
         run: |
           set -euo pipefail
@@ -183,7 +201,7 @@ jobs:
           echo ""
           echo "✅ device-google-crosshatch built"
 
-      # ── 10. Save pmbootstrap packages cache ──────────────────────────
+      # ── 11. Save pmbootstrap packages cache ──────────────────────────
       - name: Save pmbootstrap packages cache
         uses: actions/cache/save@v4
         if: always() # Save even if subsequent image building fails!
@@ -193,7 +211,7 @@ jobs:
             /home/runner/.local/var/pmbootstrap/cache_apk
           key: pmbootstrap-packages-${{ runner.os }}-${{ github.sha }}
 
-      # ── 11. Create installation image ────────────────────────────────
+      # ── 12. Create installation image ────────────────────────────────
       - name: Create installation image
         run: |
           set -euo pipefail
@@ -212,7 +230,7 @@ jobs:
           echo ""
           echo "✅ Installation image created"
 
-      # ── 12. Export images ────────────────────────────────────────────
+      # ── 13. Export images ────────────────────────────────────────────
       - name: Export flashable images
         run: |
           set -euo pipefail
@@ -267,7 +285,7 @@ jobs:
           # Remove leading whitespace (10 spaces)
           sed -i 's/^          //' "$EXPORT_DIR/FLASH_INSTRUCTIONS.txt"
 
-      # ── 13. Upload artifacts ─────────────────────────────────────────
+      # ── 14. Upload artifacts ─────────────────────────────────────────
       - name: Upload flashable images
         uses: actions/upload-artifact@v4
         with:
@@ -276,7 +294,7 @@ jobs:
           retention-days: 30
           if-no-files-found: error
 
-      # ── 14. Summary ──────────────────────────────────────────────────
+      # ── 15. Summary ──────────────────────────────────────────────────
       - name: Print summary
         if: always()
         run: |
