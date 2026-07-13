@@ -2,8 +2,7 @@ name: Build postmarketOS for Pixel 3 XL
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
     inputs:
       ui:
@@ -11,108 +10,109 @@ on:
         required: true
         default: 'plasma-mobile'
         type: choice
-        options:
-          - plasma-mobile
-          - phosh
-          - sxmo-de-sway
-          - console
+        options: [plasma-mobile, phosh, sxmo-de-sway, console]
       user_password:
-        description: 'User password for SSH login'
+        description: 'Password for user account'
         required: true
         default: 'pixel3xl'
 
 jobs:
   build:
-    name: Build postmarketOS Image
+    name: Build postmarketOS Image (Pixel 3 XL)
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    timeout-minutes: 360
 
     steps:
-      # ── 1. Install system dependencies ───────────────────────────────
+      # ─────────────────────────────────────────────────────────────────
+      # STEP 1 — System deps
+      # ─────────────────────────────────────────────────────────────────
       - name: Install system dependencies
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y \
-            python3 python3-pip python3-venv python3-setuptools \
-            git openssl binfmt-support qemu-user-static \
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            python3 python3-pip git openssl \
+            binfmt-support qemu-user-static \
             coreutils procps sudo e2fsprogs
+          echo "✅ System deps installed"
 
-      # ── 2. Install pmbootstrap & patch _prepare_cmd ──────────────────
+      # ─────────────────────────────────────────────────────────────────
+      # STEP 2 — Install pmbootstrap + patch for cached-package support
       #
-      # THE ONLY RELIABLE FIX FOR CACHED PACKAGES:
-      # pmb/helpers/apk.py:_prepare_cmd() builds every apk command.
-      # We inject --allow-untrusted right after --no-progress so ALL apk
-      # calls skip signature verification — no package re-signing needed.
-      #
-      - name: Install pmbootstrap
+      # WHY PATCH: pmb/helpers/apk.py:_prepare_cmd() builds every apk
+      # call with mirrors_exclude=True (local packages only). We need
+      # the online Alpine v3.23 mirrors included so apk can fetch deps.
+      # We also add --allow-untrusted in case cached .apk signatures
+      # don't match the current runner's key.
+      # ─────────────────────────────────────────────────────────────────
+      - name: Install and patch pmbootstrap
         run: |
           set -euo pipefail
-          pip3 install --user git+https://gitlab.postmarketos.org/postmarketOS/pmbootstrap.git
+          pip3 install --user --quiet \
+            git+https://gitlab.postmarketos.org/postmarketOS/pmbootstrap.git
           echo "$HOME/.local/bin" >> $GITHUB_PATH
           export PATH="$HOME/.local/bin:$PATH"
           pmbootstrap --version
 
-          # Patch _prepare_cmd in pmb/helpers/apk.py — TWO fixes:
-          # 1. Add --allow-untrusted so cached packages with old signatures are accepted
-          # 2. Change mirrors_exclude=True → mirrors_exclude=[] so Alpine online mirrors
-          #    are included (needed for deps like libFLAC.so.12 not in local cache)
           python3 << 'PYEOF'
-          import pmb.helpers.apk as apk_mod
-          import inspect
+          import pmb.helpers.apk as m, inspect
 
-          fpath = inspect.getfile(apk_mod)
-          print("Patching:", fpath)
+          f = inspect.getfile(m)
+          print("Patching:", f)
+          src = open(f).read()
 
-          with open(fpath) as f:
-              src = f.read()
+          patches = [
+              # Patch 1: add --allow-untrusted to every apk invocation
+              (
+                '    command_: list[str] = [str(config.work / "apk.static"), "--no-progress"]',
+                '    command_: list[str] = [str(config.work / "apk.static"), "--no-progress", "--allow-untrusted"]',
+                "Fix 1: --allow-untrusted added"
+              ),
+              # Patch 2: include online mirrors (needed for online dep resolution)
+              (
+                '        user_repository=config.work / "packages", mirrors_exclude=True',
+                '        user_repository=config.work / "packages", mirrors_exclude=[]',
+                "Fix 2: mirrors_exclude=True → [] (online mirrors enabled)"
+              ),
+          ]
 
-          # Fix 1: Add --allow-untrusted
-          OLD1 = '    command_: list[str] = [str(config.work / "apk.static"), "--no-progress"]'
-          NEW1 = '    command_: list[str] = [str(config.work / "apk.static"), "--no-progress", "--allow-untrusted"]'
-          if OLD1 not in src:
-              print("WARNING: Fix 1 target not found — already patched or source changed")
-              for i, line in enumerate(src.splitlines()):
-                  if "apk.static" in line:
-                      print(f"  L{i+1}: {line!r}")
-          else:
-              src = src.replace(OLD1, NEW1, 1)
-              print("✅ Fix 1 applied: --allow-untrusted added")
+          for old, new, label in patches:
+              if old in src:
+                  src = src.replace(old, new, 1)
+                  print(f"  ✅ {label}")
+              else:
+                  print(f"  ⚠️  {label} — target not found (may already be patched)")
 
-          # Fix 2: Include online mirrors (remove mirrors_exclude=True)
-          OLD2 = '        user_repository=config.work / "packages", mirrors_exclude=True'
-          NEW2 = '        user_repository=config.work / "packages", mirrors_exclude=[]'
-          if OLD2 not in src:
-              print("WARNING: Fix 2 target not found — checking context:")
-              for i, line in enumerate(src.splitlines()):
-                  if "mirrors_exclude" in line:
-                      print(f"  L{i+1}: {line!r}")
-          else:
-              src = src.replace(OLD2, NEW2, 1)
-              print("✅ Fix 2 applied: mirrors_exclude=True → mirrors_exclude=[]")
-
-          with open(fpath, "w") as f:
-              f.write(src)
-          print("✅ All patches applied successfully")
+          open(f, "w").write(src)
+          print("✅ pmbootstrap patched")
           PYEOF
+          echo "✅ pmbootstrap ready"
 
-          echo "✅ pmbootstrap installed and patched"
-
-      # ── 3. Configure pmbootstrap ─────────────────────────────────────
+      # ─────────────────────────────────────────────────────────────────
+      # STEP 3 — Configure pmbootstrap
+      #
+      # Channel: v25.12 → Alpine v3.23 stable
+      # REASON: Alpine edge has a BROKEN libFLAC soname right now —
+      #   edge flac provides so:libFLAC.so.14 but gst-plugins-good,
+      #   vlc etc. still depend on so:libFLAC.so.12. This causes apk
+      #   to fail with "unable to select packages". Alpine v3.23 has
+      #   consistent sonames — flac provides so:libFLAC.so.12 which
+      #   matches all dependent packages.
+      # ─────────────────────────────────────────────────────────────────
       - name: Configure pmbootstrap
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
+          mkdir -p "$HOME/.config"
 
-          CONFIG_DIR="$HOME/.config"
-          mkdir -p "$CONFIG_DIR"
+          UI="${{ github.event.inputs.ui || 'plasma-mobile' }}"
 
-          cat > "$CONFIG_DIR/pmbootstrap_v3.cfg" << 'EOF'
+          cat > "$HOME/.config/pmbootstrap_v3.cfg" << EOF
           [pmbootstrap]
           aports = /home/runner/.local/var/pmbootstrap/cache_git/pmaports
           build_default_device_arch = True
           boot_size = 512
-          channel = systemd-edge
+          channel = v25.12
           device = google-crosshatch
           extra_space = 2048
           hostname = pixel3xl
@@ -124,192 +124,204 @@ jobs:
           mirror_alpine = http://dl-cdn.alpinelinux.org/alpine/
           nonfree_firmware = True
           nonfree_userland = True
-          ssh_keys = True
-          ssh_key_glob = ~/.ssh/id_*.pub
+          ssh_keys = False
           timezone = Asia/Kolkata
-          ui = ${{ github.event.inputs.ui || 'plasma-mobile' }}
+          ui = ${UI}
           ui_extras = True
           user = user
           work = /home/runner/.local/var/pmbootstrap
           EOF
 
-          sed -i 's/^          //' "$CONFIG_DIR/pmbootstrap_v3.cfg"
-          echo "✅ pmbootstrap configured"
+          # Remove leading spaces from heredoc
+          sed -i 's/^          //' "$HOME/.config/pmbootstrap_v3.cfg"
 
-      # ── 4. Pre-initialize workdir ───────────────────────────────────
+          echo "✅ Config written:"
+          pmbootstrap config
+
+      # ─────────────────────────────────────────────────────────────────
+      # STEP 4 — Pre-init workdir
+      # ─────────────────────────────────────────────────────────────────
       - name: Pre-initialize workdir
         run: |
-          set -euo pipefail
-          WORK_DIR="/home/runner/.local/var/pmbootstrap"
-          mkdir -p "$WORK_DIR/cache_git"
-          echo "8" > "$WORK_DIR/version"
+          WORK="/home/runner/.local/var/pmbootstrap"
+          mkdir -p "$WORK/cache_git"
+          echo "8" > "$WORK/version"
+          echo "✅ Workdir initialized"
 
-      # ── 5. Restore pmbootstrap packages cache ────────────────────────
-      - name: Restore pmbootstrap packages cache
+      # ─────────────────────────────────────────────────────────────────
+      # STEP 5 — Restore cache
+      # Cache key is channel-specific so stale edge packages are ignored
+      # ─────────────────────────────────────────────────────────────────
+      - name: Restore package cache
         uses: actions/cache/restore@v4
         with:
           path: |
             /home/runner/.local/var/pmbootstrap/packages
             /home/runner/.local/var/pmbootstrap/cache_apk
-          key: pmbootstrap-packages-${{ runner.os }}-stable
+          key: pmos-v25.12-crosshatch-${{ runner.os }}
           restore-keys: |
-            pmbootstrap-packages-${{ runner.os }}-
+            pmos-v25.12-crosshatch-
 
-      # ── 6. Migrate cached packages to systemd-edge ───────────────────
-      - name: Migrate cached packages to systemd-edge
+      # ─────────────────────────────────────────────────────────────────
+      # STEP 6 — Clone pmaports (v25.12 branch, matches channel)
+      # ─────────────────────────────────────────────────────────────────
+      - name: Clone pmaports v25.12
         run: |
           set -euo pipefail
-          WORK_DIR="/home/runner/.local/var/pmbootstrap"
-
-          if [ -d "$WORK_DIR/packages/edge" ]; then
-            echo "📋 Migrating cached packages from edge → systemd-edge..."
-            mkdir -p "$WORK_DIR/packages/systemd-edge"
-            cp -rn "$WORK_DIR/packages/edge/"* "$WORK_DIR/packages/systemd-edge/" 2>/dev/null || true
-            echo "✅ Migration done"
-          else
-            echo "ℹ️ No packages/edge cache — will build from scratch"
-          fi
-
-          echo "📦 Local packages available:"
-          find "$WORK_DIR/packages" -name "*.apk" 2>/dev/null | wc -l || echo "0"
-
-      # ── 7. Clone pmaports ────────────────────────────────────────────
-      - name: Clone pmaports
-        run: |
-          set -euo pipefail
-          export PATH="$HOME/.local/bin:$PATH"
-          PMAPORTS_DIR="/home/runner/.local/var/pmbootstrap/cache_git/pmaports"
-
-          git clone --depth=1 \
+          PMAPORTS="/home/runner/.local/var/pmbootstrap/cache_git/pmaports"
+          git clone --depth=1 --branch v25.12 \
             https://gitlab.postmarketos.org/postmarketOS/pmaports.git \
-            "$PMAPORTS_DIR"
-          echo "✅ pmaports cloned"
+            "$PMAPORTS"
+          echo "✅ pmaports v25.12 cloned ($(git -C $PMAPORTS log --oneline -1))"
 
-      # ── 8. Verify configuration ──────────────────────────────────────
-      - name: Verify configuration status
+      # ─────────────────────────────────────────────────────────────────
+      # STEP 7 — Verify config
+      # ─────────────────────────────────────────────────────────────────
+      - name: Verify pmbootstrap status
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
           pmbootstrap status
-          echo "  Device: $(pmbootstrap config device)"
-          echo "  UI:     $(pmbootstrap config ui)"
+          echo "Device: $(pmbootstrap config device)"
+          echo "Channel: $(pmbootstrap config channel)"
+          echo "UI: $(pmbootstrap config ui)"
 
-      # ── 9. Build kernel ─────────────────────────────────────────────
-      - name: Build kernel (linux-google-crosshatch-mainline)
+      # ─────────────────────────────────────────────────────────────────
+      # STEP 8 — Build kernel (uses cache if available)
+      # ─────────────────────────────────────────────────────────────────
+      - name: Build kernel
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
-          echo "🔨 Building kernel (uses cache if available)..."
+          echo "🔨 Building linux-google-crosshatch-mainline..."
           pmbootstrap build linux-google-crosshatch-mainline 2>&1
-          echo "✅ Kernel ready"
+          echo "✅ Kernel done"
 
-      # ── 10. Build device package ─────────────────────────────────────
+      # ─────────────────────────────────────────────────────────────────
+      # STEP 9 — Build device package (uses cache if available)
+      # ─────────────────────────────────────────────────────────────────
       - name: Build device package
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
-          echo "📦 Building device package (uses cache if available)..."
+          echo "📦 Building device-google-crosshatch..."
           pmbootstrap build device-google-crosshatch 2>&1
-          echo "✅ Device package ready"
+          echo "✅ Device package done"
 
-      # ── 11. Save pmbootstrap packages cache ──────────────────────────
-      - name: Save pmbootstrap packages cache
+      # ─────────────────────────────────────────────────────────────────
+      # STEP 10 — Save cache (always, so next run is faster)
+      # ─────────────────────────────────────────────────────────────────
+      - name: Save package cache
         uses: actions/cache/save@v4
         if: always()
         with:
           path: |
             /home/runner/.local/var/pmbootstrap/packages
             /home/runner/.local/var/pmbootstrap/cache_apk
-          key: pmbootstrap-packages-${{ runner.os }}-stable
+          key: pmos-v25.12-crosshatch-${{ runner.os }}
 
-      # ── 12. Create installation image ────────────────────────────────
+      # ─────────────────────────────────────────────────────────────────
+      # STEP 11 — Install (create rootfs image)
+      # ─────────────────────────────────────────────────────────────────
       - name: Create installation image
         run: |
           export PATH="$HOME/.local/bin:$PATH"
-          WORK_DIR="/home/runner/.local/var/pmbootstrap"
+          WORK="/home/runner/.local/var/pmbootstrap"
+          PASSWORD="${{ github.event.inputs.user_password || 'pixel3xl' }}"
 
           echo "💾 Running pmbootstrap install..."
 
           set +e
-          printf '%s\n%s\n' \
-            "${{ github.event.inputs.user_password || 'pixel3xl' }}" \
-            "${{ github.event.inputs.user_password || 'pixel3xl' }}" | \
-          pmbootstrap install --no-fde 2>&1
-          INSTALL_EXIT=$?
+          printf '%s\n%s\n' "$PASSWORD" "$PASSWORD" | \
+            pmbootstrap install --no-fde 2>&1
+          EXIT=$?
           set -e
 
-          echo ""
-          echo "pmbootstrap install exit code: $INSTALL_EXIT"
-
-          # Always dump the full pmbootstrap log — this is where the REAL error is
-          if [ -f "$WORK_DIR/log.txt" ]; then
+          # Always show the pmbootstrap log for full error context
+          if [ -f "$WORK/log.txt" ]; then
             echo ""
-            echo "=== LAST 100 LINES OF pmbootstrap log.txt ==="
-            tail -100 "$WORK_DIR/log.txt"
-            echo "=============================================="
+            echo "══════════ pmbootstrap log (last 80 lines) ══════════"
+            tail -80 "$WORK/log.txt"
+            echo "═════════════════════════════════════════════════════"
           fi
 
-          if [ "$INSTALL_EXIT" -ne 0 ]; then
-            echo "❌ pmbootstrap install failed with exit code $INSTALL_EXIT"
+          if [ $EXIT -ne 0 ]; then
+            echo "❌ pmbootstrap install failed (exit $EXIT)"
             exit 1
           fi
-
           echo "✅ Installation image created"
 
-      # ── 13. Export images ────────────────────────────────────────────
+      # ─────────────────────────────────────────────────────────────────
+      # STEP 12 — Export flashable images
+      # ─────────────────────────────────────────────────────────────────
       - name: Export flashable images
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
+          EXPORT="/tmp/pmos-images"
+          mkdir -p "$EXPORT"
 
-          EXPORT_DIR="/tmp/pmos-images"
-          mkdir -p "$EXPORT_DIR"
-
-          pmbootstrap export "$EXPORT_DIR" 2>&1
+          pmbootstrap export "$EXPORT" 2>&1
 
           echo "📂 Exported files:"
-          ls -lah "$EXPORT_DIR/"
+          ls -lah "$EXPORT/"
 
-          IMG_COUNT=$(find "$EXPORT_DIR" -name "*.img" -size +1M | wc -l)
-          if [ "$IMG_COUNT" -eq 0 ]; then
-            echo "❌ ERROR: No .img files found!"
-            exit 1
-          fi
-          echo "✅ Found $IMG_COUNT image file(s)"
+          # Verify at least one .img file exists
+          COUNT=$(find "$EXPORT" -name "*.img" -size +1M | wc -l)
+          [ "$COUNT" -gt 0 ] || { echo "❌ No .img files found!"; exit 1; }
+          echo "✅ $COUNT image(s) ready"
 
-          cat > "$EXPORT_DIR/FLASH_INSTRUCTIONS.txt" << 'EOF'
+          # Flash instructions
+          cat > "$EXPORT/FLASH_INSTRUCTIONS.txt" << 'FLASH'
           =====================================================
-           FLASH INSTRUCTIONS — postmarketOS on Pixel 3 XL
+           postmarketOS — Google Pixel 3 XL (crosshatch)
           =====================================================
-          1. Boot into fastboot:
-             Power off → hold Volume Down + Power
-          2. Verify:  fastboot devices
-          3. Set slot: fastboot set_active a
-          4. Flash:
+          Requirements: ADB/Fastboot, unlocked bootloader
+
+          1. Boot into fastboot mode:
+             Power off → hold Vol-Down + Power
+
+          2. Verify connection:
+             fastboot devices
+
+          3. Set active slot to A:
+             fastboot set_active a
+
+          4. Flash images:
              fastboot flash boot boot.img
              fastboot flash userdata google-crosshatch.img
-          5. Reboot:  fastboot reboot
-          6. SSH:     ssh user@172.16.42.1
-          =====================================================
-          EOF
-          sed -i 's/^          //' "$EXPORT_DIR/FLASH_INSTRUCTIONS.txt"
 
-      # ── 14. Upload artifacts ─────────────────────────────────────────
+          5. Reboot:
+             fastboot reboot
+
+          6. SSH into device (USB networking):
+             ssh user@172.16.42.1
+             Password: as set during build
+          =====================================================
+          FLASH
+
+      # ─────────────────────────────────────────────────────────────────
+      # STEP 13 — Upload artifact
+      # ─────────────────────────────────────────────────────────────────
       - name: Upload flashable images
         uses: actions/upload-artifact@v4
         with:
-          name: postmarketOS-crosshatch-${{ github.event.inputs.ui || 'plasma-mobile' }}
+          name: pmos-crosshatch-${{ github.event.inputs.ui || 'plasma-mobile' }}-${{ github.run_number }}
           path: /tmp/pmos-images/
           retention-days: 30
           if-no-files-found: error
 
-      # ── 15. Summary ──────────────────────────────────────────────────
-      - name: Print summary
+      # ─────────────────────────────────────────────────────────────────
+      # STEP 14 — Summary
+      # ─────────────────────────────────────────────────────────────────
+      - name: Build summary
         if: always()
         run: |
           echo ""
-          echo "╔══════════════════════════════════════════════════╗"
-          echo "║  BUILD COMPLETE — Pixel 3 XL (crosshatch)       ║"
-          echo "║  UI: ${{ github.event.inputs.ui || 'plasma-mobile' }}"
-          echo "║  Download the artifact from the Actions tab      ║"
-          echo "╚══════════════════════════════════════════════════╝"
+          echo "╔══════════════════════════════════════════════════════╗"
+          echo "║  postmarketOS Build — Google Pixel 3 XL             ║"
+          echo "║  Channel : v25.12  (Alpine v3.23 stable)            ║"
+          echo "║  UI      : ${{ github.event.inputs.ui || 'plasma-mobile' }}                          ║"
+          echo "║  Run #   : ${{ github.run_number }}                                    ║"
+          echo "║  → Download artifact from the Actions tab           ║"
+          echo "╚══════════════════════════════════════════════════════╝"
