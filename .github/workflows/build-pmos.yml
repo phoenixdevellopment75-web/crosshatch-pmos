@@ -264,52 +264,72 @@ jobs:
 
       # ─────────────────────────────────────────────────────────────────
       # STEP 12 — Export flashable images
+      # NOTE: pmbootstrap export creates SYMLINKS into the chroot.
+      # We must use cp -rL to dereference them into real files so
+      # the upload action can find and package them correctly.
       # ─────────────────────────────────────────────────────────────────
       - name: Export flashable images
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
+          WORK="/home/runner/.local/var/pmbootstrap"
+          SYMLINKS="/tmp/pmos-symlinks"
           EXPORT="/tmp/pmos-images"
-          mkdir -p "$EXPORT"
+          mkdir -p "$SYMLINKS" "$EXPORT"
 
-          pmbootstrap export "$EXPORT" 2>&1
+          echo "📤 Running pmbootstrap export..."
+          pmbootstrap export "$SYMLINKS" 2>&1
 
-          echo "📂 Exported files:"
+          echo "📂 Symlinks created by pmbootstrap:"
+          ls -lah "$SYMLINKS/"
+
+          # Dereference symlinks → real files (critical for upload)
+          echo "📋 Copying and dereferencing symlinks to real files..."
+          cp -rL "$SYMLINKS/." "$EXPORT/"
+
+          echo "📂 Final export directory (real files):"
           ls -lah "$EXPORT/"
 
-          # Verify at least one .img file exists
-          COUNT=$(find "$EXPORT" -name "*.img" -size +1M | wc -l)
-          [ "$COUNT" -gt 0 ] || { echo "❌ No .img files found!"; exit 1; }
-          echo "✅ $COUNT image(s) ready"
+          # Verify .img files exist and are real
+          COUNT=$(find "$EXPORT" -maxdepth 1 -name "*.img" | wc -l)
+          if [ "$COUNT" -eq 0 ]; then
+            echo "❌ No .img files found in export!"
+            exit 1
+          fi
+          echo "✅ $COUNT image file(s) ready for upload"
 
           # Flash instructions
           cat > "$EXPORT/FLASH_INSTRUCTIONS.txt" << 'FLASH'
-          =====================================================
-           postmarketOS — Google Pixel 3 XL (crosshatch)
-          =====================================================
-          Requirements: ADB/Fastboot, unlocked bootloader
+=====================================================
+ postmarketOS — Google Pixel 3 XL (crosshatch)
+ Channel: v25.12 | UI: plasma-mobile
+=====================================================
+Requirements: ADB/Fastboot tools, unlocked bootloader
 
-          1. Boot into fastboot mode:
-             Power off → hold Vol-Down + Power
+FLASH STEPS:
+1. Boot into fastboot:
+   Power off → hold Vol-Down + Power
 
-          2. Verify connection:
-             fastboot devices
+2. Verify connection:
+   fastboot devices
 
-          3. Set active slot to A:
-             fastboot set_active a
+3. Set active slot to A:
+   fastboot set_active a
 
-          4. Flash images:
-             fastboot flash boot boot.img
-             fastboot flash userdata google-crosshatch.img
+4. Flash boot image:
+   fastboot flash boot boot.img
 
-          5. Reboot:
-             fastboot reboot
+5. Flash rootfs:
+   fastboot flash userdata google-crosshatch.img
 
-          6. SSH into device (USB networking):
-             ssh user@172.16.42.1
-             Password: as set during build
-          =====================================================
-          FLASH
+6. Reboot:
+   fastboot reboot
+
+7. First boot takes ~2 min. Then SSH via USB:
+   ssh user@172.16.42.1
+   (password set during build, default: pixel3xl)
+=====================================================
+FLASH
 
       # ─────────────────────────────────────────────────────────────────
       # STEP 13 — Upload artifact
