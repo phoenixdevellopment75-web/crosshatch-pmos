@@ -285,7 +285,14 @@ jobs:
 
           # Dereference symlinks → real files (critical for upload)
           echo "📋 Copying and dereferencing symlinks to real files..."
-          cp -rL "$SYMLINKS/." "$EXPORT/"
+          for f in "$SYMLINKS"/*; do
+            if [ -e "$f" ]; then
+              cp -rL "$f" "$EXPORT/"
+              echo "  ✅ Copied: $(basename "$f")"
+            else
+              echo "  ⚠️ Skipping dangling symlink: $(basename "$f")"
+            fi
+          done
 
           echo "📂 Final export directory (real files):"
           ls -lah "$EXPORT/"
