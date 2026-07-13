@@ -89,7 +89,17 @@ jobs:
           echo "✅ pmbootstrap ready"
 
       # ─────────────────────────────────────────────────────────────────
-      # STEP 3 — Configure pmbootstrap
+      # STEP 3 — Pre-init workdir (MUST come before pmbootstrap config)
+      # ─────────────────────────────────────────────────────────────────
+      - name: Pre-initialize workdir
+        run: |
+          WORK="/home/runner/.local/var/pmbootstrap"
+          mkdir -p "$WORK/cache_git"
+          echo "8" > "$WORK/version"
+          echo "✅ Workdir initialized"
+
+      # ─────────────────────────────────────────────────────────────────
+      # STEP 4 — Configure pmbootstrap
       #
       # Channel: v25.12 → Alpine v3.23 stable
       # REASON: Alpine edge has a BROKEN libFLAC soname right now —
@@ -134,19 +144,8 @@ jobs:
 
           # Remove leading spaces from heredoc
           sed -i 's/^          //' "$HOME/.config/pmbootstrap_v3.cfg"
-
-          echo "✅ Config written:"
-          pmbootstrap config
-
-      # ─────────────────────────────────────────────────────────────────
-      # STEP 4 — Pre-init workdir
-      # ─────────────────────────────────────────────────────────────────
-      - name: Pre-initialize workdir
-        run: |
-          WORK="/home/runner/.local/var/pmbootstrap"
-          mkdir -p "$WORK/cache_git"
-          echo "8" > "$WORK/version"
-          echo "✅ Workdir initialized"
+          echo "✅ Config written"
+          cat "$HOME/.config/pmbootstrap_v3.cfg"
 
       # ─────────────────────────────────────────────────────────────────
       # STEP 5 — Restore cache
