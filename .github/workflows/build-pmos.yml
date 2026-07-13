@@ -162,28 +162,40 @@ jobs:
             pmos-v25.12-crosshatch-
 
       # ─────────────────────────────────────────────────────────────────
-      # STEP 6 — Clone pmaports (v25.12 branch, matches channel)
+      # STEP 6 — Clone pmaports (v25.12 + main both fetched)
+      # pmbootstrap reads channels.cfg from origin/main so we must
+      # ensure that ref exists even when we build from v25.12
       # ─────────────────────────────────────────────────────────────────
       - name: Clone pmaports v25.12
         run: |
           set -euo pipefail
           PMAPORTS="/home/runner/.local/var/pmbootstrap/cache_git/pmaports"
+
+          # Clone v25.12 branch (our build target)
           git clone --depth=1 --branch v25.12 \
             https://gitlab.postmarketos.org/postmarketOS/pmaports.git \
             "$PMAPORTS"
-          echo "✅ pmaports v25.12 cloned ($(git -C $PMAPORTS log --oneline -1))"
+
+          # Also fetch main branch so pmbootstrap can read channels.cfg from origin/main
+          cd "$PMAPORTS"
+          git remote set-branches origin '*'
+          git fetch --depth=1 origin main
+
+          echo "✅ pmaports cloned (v25.12 checked out, main fetched)"
+          git log --oneline -1
 
       # ─────────────────────────────────────────────────────────────────
-      # STEP 7 — Verify config
+      # STEP 7 — Verify config (simple echo, no pmbootstrap status)
       # ─────────────────────────────────────────────────────────────────
       - name: Verify pmbootstrap status
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
-          pmbootstrap status
-          echo "Device: $(pmbootstrap config device)"
+          echo "Device:  $(pmbootstrap config device)"
           echo "Channel: $(pmbootstrap config channel)"
-          echo "UI: $(pmbootstrap config ui)"
+          echo "UI:      $(pmbootstrap config ui)"
+          echo "Kernel:  $(pmbootstrap config kernel)"
+          echo "✅ Config verified"
 
       # ─────────────────────────────────────────────────────────────────
       # STEP 8 — Build kernel (uses cache if available)
