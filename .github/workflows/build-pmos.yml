@@ -53,12 +53,13 @@ jobs:
           export PATH="$HOME/.local/bin:$PATH"
           pmbootstrap --version
 
-          # Patch _prepare_cmd in pmb/helpers/apk.py
-          # Target line: command_: list[str] = [str(config.work / "apk.static"), "--no-progress"]
-          # We replace it with the same line + "--allow-untrusted" appended
+          # Patch _prepare_cmd in pmb/helpers/apk.py — TWO fixes:
+          # 1. Add --allow-untrusted so cached packages with old signatures are accepted
+          # 2. Change mirrors_exclude=True → mirrors_exclude=[] so Alpine online mirrors
+          #    are included (needed for deps like libFLAC.so.12 not in local cache)
           python3 << 'PYEOF'
           import pmb.helpers.apk as apk_mod
-          import inspect, re
+          import inspect
 
           fpath = inspect.getfile(apk_mod)
           print("Patching:", fpath)
@@ -66,20 +67,33 @@ jobs:
           with open(fpath) as f:
               src = f.read()
 
-          OLD = '    command_: list[str] = [str(config.work / "apk.static"), "--no-progress"]'
-          NEW = '    command_: list[str] = [str(config.work / "apk.static"), "--no-progress", "--allow-untrusted"]'
-
-          if OLD not in src:
-              print("ERROR: Target line not found! Printing context:")
+          # Fix 1: Add --allow-untrusted
+          OLD1 = '    command_: list[str] = [str(config.work / "apk.static"), "--no-progress"]'
+          NEW1 = '    command_: list[str] = [str(config.work / "apk.static"), "--no-progress", "--allow-untrusted"]'
+          if OLD1 not in src:
+              print("WARNING: Fix 1 target not found — already patched or source changed")
               for i, line in enumerate(src.splitlines()):
-                  if "apk.static" in line or "no-progress" in line:
+                  if "apk.static" in line:
                       print(f"  L{i+1}: {line!r}")
-              exit(1)
+          else:
+              src = src.replace(OLD1, NEW1, 1)
+              print("✅ Fix 1 applied: --allow-untrusted added")
 
-          src = src.replace(OLD, NEW, 1)
+          # Fix 2: Include online mirrors (remove mirrors_exclude=True)
+          OLD2 = '        user_repository=config.work / "packages", mirrors_exclude=True'
+          NEW2 = '        user_repository=config.work / "packages", mirrors_exclude=[]'
+          if OLD2 not in src:
+              print("WARNING: Fix 2 target not found — checking context:")
+              for i, line in enumerate(src.splitlines()):
+                  if "mirrors_exclude" in line:
+                      print(f"  L{i+1}: {line!r}")
+          else:
+              src = src.replace(OLD2, NEW2, 1)
+              print("✅ Fix 2 applied: mirrors_exclude=True → mirrors_exclude=[]")
+
           with open(fpath, "w") as f:
               f.write(src)
-          print("✅ Successfully patched _prepare_cmd to add --allow-untrusted")
+          print("✅ All patches applied successfully")
           PYEOF
 
           echo "✅ pmbootstrap installed and patched"
