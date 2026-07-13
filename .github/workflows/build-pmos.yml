@@ -334,7 +334,7 @@ jobs:
                  Password: pixel3xl (or as set during build)
               ======================================================
           ''')
-          with open(os.environ['EXPORT'] + '/FLASH_INSTRUCTIONS.txt', 'w') as f:
+          with open('/tmp/pmos-images/FLASH_INSTRUCTIONS.txt', 'w') as f:
               f.write(txt.strip())
           print('Flash instructions written')
           "
