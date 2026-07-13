@@ -211,15 +211,34 @@ jobs:
       # ── 12. Create installation image ────────────────────────────────
       - name: Create installation image
         run: |
-          set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
+          WORK_DIR="/home/runner/.local/var/pmbootstrap"
 
           echo "💾 Running pmbootstrap install..."
 
+          set +e
           printf '%s\n%s\n' \
             "${{ github.event.inputs.user_password || 'pixel3xl' }}" \
             "${{ github.event.inputs.user_password || 'pixel3xl' }}" | \
           pmbootstrap install --no-fde 2>&1
+          INSTALL_EXIT=$?
+          set -e
+
+          echo ""
+          echo "pmbootstrap install exit code: $INSTALL_EXIT"
+
+          # Always dump the full pmbootstrap log — this is where the REAL error is
+          if [ -f "$WORK_DIR/log.txt" ]; then
+            echo ""
+            echo "=== LAST 100 LINES OF pmbootstrap log.txt ==="
+            tail -100 "$WORK_DIR/log.txt"
+            echo "=============================================="
+          fi
+
+          if [ "$INSTALL_EXIT" -ne 0 ]; then
+            echo "❌ pmbootstrap install failed with exit code $INSTALL_EXIT"
+            exit 1
+          fi
 
           echo "✅ Installation image created"
 
