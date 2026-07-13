@@ -298,38 +298,39 @@ jobs:
           fi
           echo "✅ $COUNT image file(s) ready for upload"
 
-          # Flash instructions
-          cat > "$EXPORT/FLASH_INSTRUCTIONS.txt" << 'FLASH'
-=====================================================
- postmarketOS — Google Pixel 3 XL (crosshatch)
+          # Write flash instructions using python3 to avoid YAML heredoc conflicts
+          python3 -c "
+txt = '''
+======================================================
+ postmarketOS - Google Pixel 3 XL (crosshatch)
  Channel: v25.12 | UI: plasma-mobile
-=====================================================
+======================================================
 Requirements: ADB/Fastboot tools, unlocked bootloader
 
 FLASH STEPS:
 1. Boot into fastboot:
-   Power off → hold Vol-Down + Power
+   Power off, hold Vol-Down + Power
 
-2. Verify connection:
-   fastboot devices
+2. Verify:  fastboot devices
 
-3. Set active slot to A:
-   fastboot set_active a
+3. Set slot: fastboot set_active a
 
-4. Flash boot image:
+4. Flash:
    fastboot flash boot boot.img
-
-5. Flash rootfs:
    fastboot flash userdata google-crosshatch.img
 
-6. Reboot:
-   fastboot reboot
+5. Reboot: fastboot reboot
 
-7. First boot takes ~2 min. Then SSH via USB:
+6. First boot ~2 min. SSH via USB:
    ssh user@172.16.42.1
-   (password set during build, default: pixel3xl)
-=====================================================
-FLASH
+   Password: pixel3xl (or as set during build)
+======================================================
+'''
+import os
+with open(os.environ['EXPORT'] + '/FLASH_INSTRUCTIONS.txt', 'w') as f:
+    f.write(txt.strip())
+print('Flash instructions written')
+"
 
       # ─────────────────────────────────────────────────────────────────
       # STEP 13 — Upload artifact
