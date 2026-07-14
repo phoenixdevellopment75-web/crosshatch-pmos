@@ -1,0 +1,19 @@
+--- a/arch/arm64/boot/dts/qcom/sdm845-crosshatch.dts
++++ b/arch/arm64/boot/dts/qcom/sdm845-crosshatch.dts
+@@ -2290,9 +2290,13 @@
+ 			#iommu-cells = <0x01>;
+ 			#global-interrupts = <0x02>;
+ 			interrupts = <0x00 0xe5 0x04 0x00 0xe7 0x04 0x00 0x16c 0x01 0x00 0x16d 0x01 0x00 0x16e 0x01 0x00 0x16f 0x01 0x00 0x170 0x01 0x00 0x171 0x01 0x00 0x172 0x01 0x00 0x173 0x01>;
+-			clocks = <0x24 0x21 0x24 0x1e>;
+-			clock-names = "bus", "iface";
+-			power-domains = <0x7c 0x00>;
++			/* Removed clocks + power-domains: gcc_gpu_memnoc_gfx_clk (bus clock)
++			 * is stuck 'off' because it is gated by the GPU GDSC which has not
++			 * powered on yet when arm-smmu probes. This causes -EBUSY and probe
++			 * failure which cascades to block the entire display driver stack.
++			 * The SMMU hardware was left initialized by the bootloader and
++			 * operates correctly without these clock/power-domain references
++			 * during early boot. This matches the fix in mainline SDM845 patches. */
+ 			phandle = <0x78>;
+ 		};
+ 

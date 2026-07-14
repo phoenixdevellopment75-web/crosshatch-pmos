@@ -198,12 +198,35 @@ jobs:
           echo "✅ Config verified"
 
       # ─────────────────────────────────────────────────────────────────
-      # STEP 8 — Build kernel (uses cache if available)
+      # STEP 8 — Patch and build kernel (uses cache if available)
       # ─────────────────────────────────────────────────────────────────
-      - name: Build kernel
+      - name: Patch and build kernel
         run: |
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
+          
+          APORTS="/home/runner/.local/var/pmbootstrap/cache_git/pmaports"
+          CONFIG="$APORTS/device/testing/linux-google-crosshatch-mainline/config-google-crosshatch-mainline.aarch64"
+          APKBUILD="$APORTS/device/testing/linux-google-crosshatch-mainline/APKBUILD"
+          DEVINFO="$APORTS/device/testing/device-google-crosshatch/deviceinfo"
+          
+          echo "📂 Copying SMMU deadlock fix patch to kernel package..."
+          cp "$GITHUB_WORKSPACE/0002-fix-smmu-deadlock.patch" "$APORTS/device/testing/linux-google-crosshatch-mainline/"
+          
+          echo "🔧 Adding patch to kernel APKBUILD..."
+          sed -i '/0001-linux4.17-gcc10-extern_YYLOC_global_declaration.patch/a \\t0002-fix-smmu-deadlock.patch' "$APKBUILD"
+          
+          echo "🔧 Enabling Samsung S6E3HA8/S6E3HA2 display panel drivers in kernel config..."
+          sed -i 's/# CONFIG_DRM_PANEL_SAMSUNG_S6E3HA8 is not set/CONFIG_DRM_PANEL_SAMSUNG_S6E3HA8=m/' "$CONFIG"
+          sed -i 's/# CONFIG_DRM_PANEL_SAMSUNG_S6E3HA2 is not set/CONFIG_DRM_PANEL_SAMSUNG_S6E3HA2=m/' "$CONFIG"
+          
+          echo "🔧 Enabling display framebuffer and setting USB network to RNDIS in deviceinfo..."
+          sed -i 's/deviceinfo_no_framebuffer="true"/# deviceinfo_no_framebuffer="true"/' "$DEVINFO"
+          echo 'deviceinfo_usb_network_function="rndis.usb0"' >> "$DEVINFO"
+          
+          echo "🔄 Regenerating package checksums..."
+          pmbootstrap checksum linux-google-crosshatch-mainline device-google-crosshatch
+          
           echo "🔨 Building linux-google-crosshatch-mainline..."
           pmbootstrap build linux-google-crosshatch-mainline 2>&1
           echo "✅ Kernel done"
