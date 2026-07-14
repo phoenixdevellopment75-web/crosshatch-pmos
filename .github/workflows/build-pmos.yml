@@ -23,6 +23,9 @@ jobs:
     timeout-minutes: 360
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       # ─────────────────────────────────────────────────────────────────
       # STEP 1 — System deps
       # ─────────────────────────────────────────────────────────────────
