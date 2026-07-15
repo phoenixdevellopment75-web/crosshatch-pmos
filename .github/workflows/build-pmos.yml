@@ -220,11 +220,15 @@ jobs:
           sudo chmod -R 777 /home/runner/.local/var/pmbootstrap/cache_apk || true
           sudo chmod -R 777 /home/runner/.local/var/pmbootstrap/cache_ccache_aarch64 || true
           sudo chmod -R 777 /home/runner/.local/var/pmbootstrap/cache_ccache_x86_64 || true
-
+          
+          # Fix ownership to the runner user
+          sudo chown -R $USER:$USER /home/runner/.local/var/pmbootstrap || true
+ 
           if [ -d "/home/runner/.local/var/pmbootstrap/config_apk_keys" ]; then
             echo "🔑 Ensuring correct secure permissions for signing keys..."
-            sudo chmod 700 /home/runner/.local/var/pmbootstrap/config_apk_keys || true
-            sudo find /home/runner/.local/var/pmbootstrap/config_apk_keys -type f -exec chmod 600 {} + || true
+            chmod 755 /home/runner/.local/var/pmbootstrap/config_apk_keys || true
+            find /home/runner/.local/var/pmbootstrap/config_apk_keys -type f -name "*.pub" -exec chmod 644 {} + || true
+            find /home/runner/.local/var/pmbootstrap/config_apk_keys -type f -name "*.rsa" -exec chmod 600 {} + || true
           fi
           
           APORTS="/home/runner/.local/var/pmbootstrap/cache_git/pmaports"
