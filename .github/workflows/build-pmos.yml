@@ -231,7 +231,15 @@ jobs:
           pmbootstrap checksum linux-google-crosshatch-mainline device-google-crosshatch
           
           echo "🔨 Building linux-google-crosshatch-mainline..."
+          set +e
           pmbootstrap build linux-google-crosshatch-mainline --force 2>&1
+          EXIT=$?
+          set -e
+          if [ $EXIT -ne 0 ]; then
+            echo "❌ Kernel build failed! Printing last 200 lines of pmbootstrap log..."
+            tail -200 /home/runner/.local/var/pmbootstrap/log.txt
+            exit 1
+          fi
           echo "✅ Kernel done"
 
       # ─────────────────────────────────────────────────────────────────
