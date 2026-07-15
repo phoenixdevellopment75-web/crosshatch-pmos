@@ -1,19 +1,24 @@
 --- a/arch/arm64/boot/dts/qcom/sdm845.dtsi
 +++ b/arch/arm64/boot/dts/qcom/sdm845.dtsi
-@@ -2290,9 +2290,13 @@
- 			#iommu-cells = <0x01>;
- 			#global-interrupts = <0x02>;
- 			interrupts = <0x00 0xe5 0x04 0x00 0xe7 0x04 0x00 0x16c 0x01 0x00 0x16d 0x01 0x00 0x16e 0x01 0x00 0x16f 0x01 0x00 0x170 0x01 0x00 0x171 0x01 0x00 0x172 0x01 0x00 0x173 0x01>;
--			clocks = <0x24 0x21 0x24 0x1e>;
+@@ -2307,17 +2307,6 @@
+ 		adreno_smmu: iommu@5040000 {
+ 			compatible = "qcom,sdm845-smmu-v2", "qcom,smmu-v2";
+ 			reg = <0 0x5040000 0 0x10000>;
+ 			#iommu-cells = <1>;
+ 			#global-interrupts = <2>;
+ 			interrupts = <GIC_SPI 229 IRQ_TYPE_LEVEL_HIGH>,
+ 				     <GIC_SPI 231 IRQ_TYPE_LEVEL_HIGH>,
+ 				     <GIC_SPI 364 IRQ_TYPE_EDGE_RISING>,
+ 				     <GIC_SPI 365 IRQ_TYPE_EDGE_RISING>,
+ 				     <GIC_SPI 366 IRQ_TYPE_EDGE_RISING>,
+ 				     <GIC_SPI 367 IRQ_TYPE_EDGE_RISING>,
+ 				     <GIC_SPI 368 IRQ_TYPE_EDGE_RISING>,
+ 				     <GIC_SPI 369 IRQ_TYPE_EDGE_RISING>,
+ 				     <GIC_SPI 370 IRQ_TYPE_EDGE_RISING>,
+ 				     <GIC_SPI 371 IRQ_TYPE_EDGE_RISING>;
+-			clocks = <&gcc GCC_GPU_MEMNOC_GFX_CLK>,
+-			         <&gcc GCC_GPU_CFG_AHB_CLK>;
 -			clock-names = "bus", "iface";
--			power-domains = <0x7c 0x00>;
-+			/* Removed clocks + power-domains: gcc_gpu_memnoc_gfx_clk (bus clock)
-+			 * is stuck 'off' because it is gated by the GPU GDSC which has not
-+			 * powered on yet when arm-smmu probes. This causes -EBUSY and probe
-+			 * failure which cascades to block the entire display driver stack.
-+			 * The SMMU hardware was left initialized by the bootloader and
-+			 * operates correctly without these clock/power-domain references
-+			 * during early boot. This matches the fix in mainline SDM845 patches. */
- 			phandle = <0x78>;
+-
+-			power-domains = <&gpucc GPU_CX_GDSC>;
  		};
- 
