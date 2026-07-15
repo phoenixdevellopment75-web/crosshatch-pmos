@@ -160,6 +160,8 @@ jobs:
           path: |
             /home/runner/.local/var/pmbootstrap/packages
             /home/runner/.local/var/pmbootstrap/cache_apk
+            /home/runner/.local/var/pmbootstrap/cache_ccache_aarch64
+            /home/runner/.local/var/pmbootstrap/cache_ccache_x86_64
           key: pmos-v25.12-crosshatch-${{ runner.os }}
           restore-keys: |
             pmos-v25.12-crosshatch-
@@ -268,6 +270,8 @@ jobs:
           path: |
             /home/runner/.local/var/pmbootstrap/packages
             /home/runner/.local/var/pmbootstrap/cache_apk
+            /home/runner/.local/var/pmbootstrap/cache_ccache_aarch64
+            /home/runner/.local/var/pmbootstrap/cache_ccache_x86_64
           key: pmos-v25.12-crosshatch-${{ runner.os }}
 
       # ─────────────────────────────────────────────────────────────────
