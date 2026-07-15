@@ -366,6 +366,24 @@ jobs:
             fi
           done
 
+          if [ -f "$EXPORT/boot.img" ]; then
+            echo "📥 Downloading avbtool from AOSP..."
+            curl -sL -o /tmp/avbtool.b64 "https://android.googlesource.com/platform/external/avb/+/refs/heads/main/avbtool.py?format=TEXT"
+            base64 -d /tmp/avbtool.b64 > /tmp/avbtool
+            chmod +x /tmp/avbtool
+            
+            echo "🛡️ Appending AVB Hash Footer to boot.img for Pixel 3 XL compatibility..."
+            /tmp/avbtool add_hash_footer \
+              --image "$EXPORT/boot.img" \
+              --partition_size 67108864 \
+              --partition_name boot \
+              --algorithm NONE \
+              --prop com.android.build.boot.os_version:12 \
+              --prop com.android.build.boot.security_patch:2021-10-05
+              
+            echo "✅ AVB Hash Footer added successfully!"
+          fi
+
           echo "📂 Final export directory (real files):"
           ls -lah "$EXPORT/"
 
