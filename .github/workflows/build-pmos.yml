@@ -231,7 +231,7 @@ jobs:
           pmbootstrap checksum linux-google-crosshatch-mainline device-google-crosshatch
           
           echo "🔨 Building linux-google-crosshatch-mainline..."
-          pmbootstrap build linux-google-crosshatch-mainline 2>&1
+          pmbootstrap build linux-google-crosshatch-mainline --force 2>&1
           echo "✅ Kernel done"
 
       # ─────────────────────────────────────────────────────────────────
@@ -242,7 +242,7 @@ jobs:
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
           echo "📦 Building device-google-crosshatch..."
-          pmbootstrap build device-google-crosshatch 2>&1
+          pmbootstrap build device-google-crosshatch --force 2>&1
           echo "✅ Device package done"
 
       # ─────────────────────────────────────────────────────────────────
