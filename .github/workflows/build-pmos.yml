@@ -256,6 +256,10 @@ jobs:
           echo 'deviceinfo_header_version="2"' >> "$DEVINFO"
           echo 'deviceinfo_flash_offset_dtb="0x01f00000"' >> "$DEVINFO"
           
+          # Fix bootloader offsets and OS version rollback protection to match stock Pixel 3 XL
+          sed -i 's/deviceinfo_flash_offset_second="0x00f00000"/deviceinfo_flash_offset_second="0x00000000"/' "$DEVINFO"
+          echo 'deviceinfo_bootimg_custom_args="--os_version 12.0.0 --os_patch_level 2021-10"' >> "$DEVINFO"
+          
           echo "🔄 Regenerating package checksums..."
           pmbootstrap checksum linux-google-crosshatch-mainline device-google-crosshatch
           
