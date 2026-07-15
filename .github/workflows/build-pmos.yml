@@ -213,14 +213,14 @@ jobs:
           APKBUILD="$APORTS/device/testing/linux-google-crosshatch-mainline/APKBUILD"
           DEVINFO="$APORTS/device/testing/device-google-crosshatch/deviceinfo"
           
-          echo "📂 Copying fix_dtsi.py helper to kernel package..."
-          cp "$GITHUB_WORKSPACE/fix_dtsi.py" "$APORTS/device/testing/linux-google-crosshatch-mainline/"
+          echo "📂 Copying fix_dtsi.sh helper to kernel package..."
+          cp "$GITHUB_WORKSPACE/fix_dtsi.sh" "$APORTS/device/testing/linux-google-crosshatch-mainline/"
           
-          echo "🔧 Adding fix_dtsi.py to kernel APKBUILD sources..."
-          sed -i '/0001-linux4.17-gcc10-extern_YYLOC_global_declaration.patch/a \\tfix_dtsi.py' "$APKBUILD"
+          echo "🔧 Adding fix_dtsi.sh to kernel APKBUILD sources..."
+          sed -i '/0001-linux4.17-gcc10-extern_YYLOC_global_declaration.patch/a \\tfix_dtsi.sh' "$APKBUILD"
           
-          echo "🔧 Inserting python execution of fix_dtsi.py into prepare() function..."
-          sed -i '/default_prepare/a \\tpython3 "$srcdir"/fix_dtsi.py' "$APKBUILD"
+          echo "🔧 Inserting execution of fix_dtsi.sh into prepare() function..."
+          sed -i '/default_prepare/a \\tbash "$srcdir"/fix_dtsi.sh' "$APKBUILD"
           
           echo "🔧 Enabling Samsung S6E3HA8/S6E3HA2 display panel drivers in kernel config..."
           sed -i 's/# CONFIG_DRM_PANEL_SAMSUNG_S6E3HA8 is not set/CONFIG_DRM_PANEL_SAMSUNG_S6E3HA8=m/' "$CONFIG"
