@@ -40,6 +40,14 @@ perl -0777 -pi -e \
   drivers/gpu/drm/panel/panel-samsung-s6e3ha8.c
 echo "✅ panel-samsung-s6e3ha8.c patched successfully!"
 
+# ── Fix 3: Pixel 3 XL DTB compatibility properties ───────────
+echo ""
+echo "🔧 [3/3] Patching sdm845-crosshatch.dts — adding qcom,msm-id and qcom,board-id..."
+perl -0777 -pi -e \
+  's/model = "Qualcomm Technologies, Inc. SDM845 MTP";\s*compatible = "qcom,sdm845-mtp";/model = "Google Pixel 3 XL";\n\tcompatible = "google,crosshatch", "qcom,sdm845";\n\tqcom,msm-id = <321 0x20000>, <321 0x20001>;\n\tqcom,board-id = <0 0>;/s' \
+  arch/arm64/boot/dts/qcom/sdm845-crosshatch.dts
+echo "✅ sdm845-crosshatch.dts patched successfully!"
+
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "  All patches applied. Proceeding with kernel build..."
