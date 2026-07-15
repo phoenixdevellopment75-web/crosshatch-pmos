@@ -162,9 +162,10 @@ jobs:
             /home/runner/.local/var/pmbootstrap/cache_apk
             /home/runner/.local/var/pmbootstrap/cache_ccache_aarch64
             /home/runner/.local/var/pmbootstrap/cache_ccache_x86_64
-          key: pmos-v25.12-crosshatch-${{ runner.os }}
+            /home/runner/.local/var/pmbootstrap/config_apk_keys
+          key: pmos-v25.12-crosshatch-v2-${{ runner.os }}
           restore-keys: |
-            pmos-v25.12-crosshatch-
+            pmos-v25.12-crosshatch-v2-
 
       # ─────────────────────────────────────────────────────────────────
       # STEP 6 — Clone pmaports (v25.12 + main both fetched)
@@ -219,6 +220,12 @@ jobs:
           sudo chmod -R 777 /home/runner/.local/var/pmbootstrap/cache_apk || true
           sudo chmod -R 777 /home/runner/.local/var/pmbootstrap/cache_ccache_aarch64 || true
           sudo chmod -R 777 /home/runner/.local/var/pmbootstrap/cache_ccache_x86_64 || true
+
+          if [ -d "/home/runner/.local/var/pmbootstrap/config_apk_keys" ]; then
+            echo "🔑 Ensuring correct secure permissions for signing keys..."
+            sudo chmod 700 /home/runner/.local/var/pmbootstrap/config_apk_keys || true
+            sudo find /home/runner/.local/var/pmbootstrap/config_apk_keys -type f -exec chmod 600 {} + || true
+          fi
           
           APORTS="/home/runner/.local/var/pmbootstrap/cache_git/pmaports"
           CONFIG="$APORTS/device/testing/linux-google-crosshatch-mainline/config-google-crosshatch-mainline.aarch64"
@@ -283,7 +290,8 @@ jobs:
             /home/runner/.local/var/pmbootstrap/cache_apk
             /home/runner/.local/var/pmbootstrap/cache_ccache_aarch64
             /home/runner/.local/var/pmbootstrap/cache_ccache_x86_64
-          key: pmos-v25.12-crosshatch-${{ runner.os }}
+            /home/runner/.local/var/pmbootstrap/config_apk_keys
+          key: pmos-v25.12-crosshatch-v2-${{ runner.os }}
 
       # ─────────────────────────────────────────────────────────────────
       # STEP 11 — Install (create rootfs image)
