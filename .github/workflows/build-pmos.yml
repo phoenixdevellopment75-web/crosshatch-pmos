@@ -210,6 +210,12 @@ jobs:
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
           
+          echo "🔑 Fixing ccache directory permissions..."
+          sudo mkdir -p /home/runner/.local/var/pmbootstrap/cache_ccache_aarch64
+          sudo mkdir -p /home/runner/.local/var/pmbootstrap/cache_ccache_x86_64
+          sudo chmod -R 777 /home/runner/.local/var/pmbootstrap/cache_ccache_aarch64
+          sudo chmod -R 777 /home/runner/.local/var/pmbootstrap/cache_ccache_x86_64
+          
           APORTS="/home/runner/.local/var/pmbootstrap/cache_git/pmaports"
           CONFIG="$APORTS/device/testing/linux-google-crosshatch-mainline/config-google-crosshatch-mainline.aarch64"
           APKBUILD="$APORTS/device/testing/linux-google-crosshatch-mainline/APKBUILD"
