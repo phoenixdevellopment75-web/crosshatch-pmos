@@ -239,8 +239,10 @@ jobs:
           EXIT=$?
           set -e
           if [ $EXIT -ne 0 ]; then
-            echo "❌ Kernel build failed! Printing last 200 lines of pmbootstrap log..."
-            tail -200 /home/runner/.local/var/pmbootstrap/log.txt
+            echo "❌ Kernel build failed! Searching for errors in log..."
+            grep -i -C 5 "error:" /home/runner/.local/var/pmbootstrap/log.txt || true
+            echo "❌ Printing last 2000 lines of pmbootstrap log..."
+            tail -2000 /home/runner/.local/var/pmbootstrap/log.txt
             exit 1
           fi
           echo "✅ Kernel done"
