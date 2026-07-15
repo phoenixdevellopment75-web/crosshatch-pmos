@@ -228,9 +228,10 @@ jobs:
           sed -i 's/# CONFIG_DRM_PANEL_SAMSUNG_S6E3HA8 is not set/CONFIG_DRM_PANEL_SAMSUNG_S6E3HA8=m/' "$CONFIG"
           sed -i 's/# CONFIG_DRM_PANEL_SAMSUNG_S6E3HA2 is not set/CONFIG_DRM_PANEL_SAMSUNG_S6E3HA2=m/' "$CONFIG"
           
-          echo "🔧 Enabling display framebuffer and setting USB network to RNDIS in deviceinfo..."
+          echo "🔧 Enabling display framebuffer, UFS storage, display modules, and setting USB network to RNDIS in deviceinfo..."
           sed -i 's/deviceinfo_no_framebuffer="true"/# deviceinfo_no_framebuffer="true"/' "$DEVINFO"
           echo 'deviceinfo_usb_network_function="rndis.usb0"' >> "$DEVINFO"
+          echo 'deviceinfo_modules_initfs="phy-qcom-ufs phy-qcom-ufs-qmp-14nm phy-qcom-qmp ufs-qcom msm panel-samsung-s6e3ha8 panel-samsung-s6e3ha2"' >> "$DEVINFO"
           
           echo "🔄 Regenerating package checksums..."
           pmbootstrap checksum linux-google-crosshatch-mainline device-google-crosshatch
