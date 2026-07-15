@@ -210,8 +210,15 @@ jobs:
           set -euo pipefail
           export PATH="$HOME/.local/bin:$PATH"
           
-          echo "🔑 Fixing pmbootstrap working directory and cache permissions..."
-          sudo chmod -R 777 /home/runner/.local/var/pmbootstrap || true
+          echo "🔑 Fixing cache and packages directory permissions..."
+          sudo mkdir -p /home/runner/.local/var/pmbootstrap/packages
+          sudo mkdir -p /home/runner/.local/var/pmbootstrap/cache_apk
+          sudo mkdir -p /home/runner/.local/var/pmbootstrap/cache_ccache_aarch64
+          sudo mkdir -p /home/runner/.local/var/pmbootstrap/cache_ccache_x86_64
+          sudo chmod -R 777 /home/runner/.local/var/pmbootstrap/packages || true
+          sudo chmod -R 777 /home/runner/.local/var/pmbootstrap/cache_apk || true
+          sudo chmod -R 777 /home/runner/.local/var/pmbootstrap/cache_ccache_aarch64 || true
+          sudo chmod -R 777 /home/runner/.local/var/pmbootstrap/cache_ccache_x86_64 || true
           
           APORTS="/home/runner/.local/var/pmbootstrap/cache_git/pmaports"
           CONFIG="$APORTS/device/testing/linux-google-crosshatch-mainline/config-google-crosshatch-mainline.aarch64"
