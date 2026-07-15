@@ -1,5 +1,5 @@
---- a/arch/arm64/boot/dts/qcom/sdm845-crosshatch.dts
-+++ b/arch/arm64/boot/dts/qcom/sdm845-crosshatch.dts
+--- a/arch/arm64/boot/dts/qcom/sdm845.dtsi
++++ b/arch/arm64/boot/dts/qcom/sdm845.dtsi
 @@ -2290,9 +2290,13 @@
  			#iommu-cells = <0x01>;
  			#global-interrupts = <0x02>;
